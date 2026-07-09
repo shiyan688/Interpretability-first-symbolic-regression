@@ -106,7 +106,12 @@ def _override_pysr_options(base: dict[str, Any], args: argparse.Namespace) -> di
 def cmd_run_pysr(args: argparse.Namespace) -> None:
     cfg = WorkflowConfig.from_json(args.config)
     opts = _override_pysr_options(cfg.pysr_options(), args)
-    feature_dir = Path(args.feature_dir).expanduser() if args.feature_dir else cfg.output_root / "feature_tables" / args.target
+    if args.feature_dir:
+        feature_dir = Path(args.feature_dir).expanduser()
+    else:
+        pool_dir = cfg.output_root / "feature_tables" / f"{args.target}__pysr_pool"
+        raw_dir = cfg.output_root / "feature_tables" / args.target
+        feature_dir = pool_dir if pool_dir.exists() else raw_dir
     run_dir = cfg.output_root / "runs" / args.run_name / args.target
     result = run_pysr(feature_dir, run_dir, opts, args.target)
     print(

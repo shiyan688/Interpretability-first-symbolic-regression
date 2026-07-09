@@ -1,0 +1,19 @@
+{
+  "target": "y",
+  "proposed_factors": [
+    {
+      "name": "x1_x2_interaction",
+      "expression": "(raw_x1 * raw_x2)",
+      "meaning": "interaction between the two strongest toy variables",
+      "dimension_note": "demo screening factor",
+      "priority": 1
+    },
+    {
+      "name": "x1_curvature",
+      "expression": "square(raw_x1)",
+      "meaning": "simple curvature term for the monotonic variable",
+      "dimension_note": "demo screening factor",
+      "priority": 2
+    }
+  ]
+}

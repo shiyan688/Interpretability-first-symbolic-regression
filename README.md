@@ -36,20 +36,69 @@
 
 ## 安装方式
 
-在已有环境中直接用源码运行：
+Clone 后直接安装：
 
 ```bash
+git clone https://github.com/shiyan688/Interpretability-first-symbolic-regression.git
 cd Interpretability-first-symbolic-regression
+python -m pip install -e .
 python -m factor_pysr_llm.cli --help
 ```
 
-如果在新环境中安装：
+## 典型流程
+
+### 30 秒 Demo
+
+仓库自带一个小型 toy CSV：`examples/toy_regression.csv`。路径全部是相对路径，
+用户 clone 后可以直接跑数据解析、因子挖掘、LLM prompt 生成和 PySR 输入表构建：
 
 ```bash
-python -m pip install -e .
+python -m factor_pysr_llm.cli inspect-dataset \
+  --config configs/generic_tabular_template.json
+
+python -m factor_pysr_llm.cli build-raw \
+  --config configs/generic_tabular_template.json \
+  --target y
+
+python -m factor_pysr_llm.cli llm-propose-factors \
+  --config configs/generic_tabular_template.json \
+  --target y
+
+python -m factor_pysr_llm.cli mine-factors \
+  --config configs/generic_tabular_template.json \
+  --target y \
+  --llm-proposals examples/factor_proposals.example.json
+
+python -m factor_pysr_llm.cli llm-select-factors \
+  --config configs/generic_tabular_template.json \
+  --target y
+
+python -m factor_pysr_llm.cli build-pysr-pool \
+  --config configs/generic_tabular_template.json \
+  --target y \
+  --llm-selection examples/factor_selection.example.json
 ```
 
-## 典型流程
+输出会写到 `outputs/toy_regression_run/`。PySR 是可选依赖，装好 PySR 后再跑：
+
+```bash
+python -m factor_pysr_llm.cli run-pysr \
+  --config configs/generic_tabular_template.json \
+  --target y \
+  --run-name pysr_toy_factor_pool
+```
+
+也可以用脚本跑完整 demo 的非 PySR 部分：
+
+```bash
+bash scripts/run_generic_pipeline.sh
+```
+
+如果已经安装 PySR，并且希望脚本最后启动 PySR：
+
+```bash
+RUN_PYSR=1 bash scripts/run_generic_pipeline.sh
+```
 
 ### 通用 CSV 数据集
 
@@ -57,8 +106,8 @@ python -m pip install -e .
 
 ```json
 {
-  "input_csv": "/path/to/data.csv",
-  "output_root": "/path/to/outputs/run1",
+  "input_csv": "../data/my_data.csv",
+  "output_root": "../outputs/my_run",
   "targets": ["target_y"],
   "dataset": {
     "format": "tabular_csv_v1",
@@ -83,6 +132,9 @@ python -m pip install -e .
   }
 }
 ```
+
+配置文件中的相对路径按“配置文件所在目录”解析。比如配置在 `configs/` 下，
+`"../data/my_data.csv"` 指向仓库根目录的 `data/my_data.csv`。
 
 字段规则：
 
@@ -125,7 +177,7 @@ Python SISSO-like 挖因子：
 python -m factor_pysr_llm.cli mine-factors \
   --config configs/generic_tabular_template.json \
   --target target_y \
-  --llm-proposals /path/to/factor_proposals.json
+  --llm-proposals examples/factor_proposals.example.json
 ```
 
 `--llm-proposals` 是可选项；如果提供，LLM 提出的表达式会先按当前
@@ -145,7 +197,7 @@ python -m factor_pysr_llm.cli llm-select-factors \
 python -m factor_pysr_llm.cli build-pysr-pool \
   --config configs/generic_tabular_template.json \
   --target target_y \
-  --llm-selection /path/to/factor_selection.json
+  --llm-selection examples/factor_selection.example.json
 ```
 
 然后直接接 PySR：
@@ -154,7 +206,6 @@ python -m factor_pysr_llm.cli build-pysr-pool \
 python -m factor_pysr_llm.cli run-pysr \
   --config configs/generic_tabular_template.json \
   --target target_y \
-  --feature-dir /path/to/feature_tables/target_y__pysr_pool \
   --run-name pysr_factor_pool_target_y
 ```
 
@@ -164,7 +215,7 @@ python -m factor_pysr_llm.cli run-pysr \
 python -m factor_pysr_llm.cli llm-interpret \
   --config configs/generic_tabular_template.json \
   --target target_y \
-  --result /path/to/best_result.json
+  --result outputs/my_run/runs/pysr_factor_pool_target_y/target_y/best_result.json
 ```
 
 ### 复用历史高分因子
@@ -181,10 +232,10 @@ python -m factor_pysr_llm.cli build-union \
 
 ```bash
 python -m factor_pysr_llm.cli mine-exprs \
-  --roots /path/to/previous_run_a \
-          /path/to/previous_run_b \
-          /path/to/previous_run_c \
-  --output /path/to/outputs/expr_list.csv \
+  --roots previous_runs/run_a \
+          previous_runs/run_b \
+          previous_runs/run_c \
+  --output outputs/history_union_run/expr_list.csv \
   --top-k-per-target 1000
 ```
 
@@ -206,8 +257,8 @@ python -m factor_pysr_llm.cli run-pysr \
 
 ```bash
 python -m factor_pysr_llm.cli verify \
-  --feature-dir /path/to/feature_tables/target_y \
-  --result /path/to/best_result.json
+  --feature-dir outputs/history_union_run/feature_tables/target_y \
+  --result outputs/history_union_run/runs/pysr_history_union_target_y/target_y/best_result.json
 ```
 
 5. 生成 LLM brief：
@@ -247,4 +298,4 @@ outputs/
 
 `configs/history_union_template.json` 是历史结果合并模板：它可以合并旧 PySR raw 输入、
 旧因子表、旧最佳公式 prediction、旧 HOF/equation snapshot prediction。实际使用时将
-`/path/to/...` 替换成自己的结果目录。
+`data/`、`previous_runs/`、`outputs/` 换成自己的相对目录即可。

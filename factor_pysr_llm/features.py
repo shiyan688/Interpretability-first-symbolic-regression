@@ -197,14 +197,14 @@ def load_raw_pysr_source(cfg: WorkflowConfig, target: str) -> tuple[pd.DataFrame
     raw_cfg = dict(cfg.data.get("raw_pysr") or {})
     if not raw_cfg:
         return pd.DataFrame(), pd.DataFrame(), {}
-    run_root = Path(raw_cfg["run_root"]).expanduser()
+    run_root = cfg.resolve_path(raw_cfg["run_root"])
     manifest_path = run_root / target / "input_manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"raw PySR manifest missing: {manifest_path}")
     raw_z, _ = raw_feature_frame_from_manifest(cfg.input_csv, target, manifest_path)
     meta_cols: dict[str, np.ndarray] = {}
     if raw_cfg.get("include_best_prediction", True):
-        confirmed_path = Path(raw_cfg["confirmed_csv"]).expanduser()
+        confirmed_path = cfg.resolve_path(raw_cfg["confirmed_csv"])
         confirmed = safe_read_csv(confirmed_path)
         if target in set(confirmed.get("target", pd.Series(dtype=str)).astype(str)):
             expr = str(confirmed.loc[confirmed["target"].astype(str).eq(target), "expression"].iloc[0])
@@ -226,8 +226,8 @@ def load_raw_pysr_source(cfg: WorkflowConfig, target: str) -> tuple[pd.DataFrame
     return raw_z, meta, summary
 
 
-def source_feature_frame(source_cfg: dict[str, Any], target: str) -> pd.DataFrame:
-    path = Path(str(source_cfg["feature_path"]).format(target=target)).expanduser()
+def source_feature_frame(cfg: WorkflowConfig, source_cfg: dict[str, Any], target: str) -> pd.DataFrame:
+    path = cfg.resolve_path(str(source_cfg["feature_path"]).format(target=target))
     if not path.exists():
         raise FileNotFoundError(f"feature source missing: {path}")
     return finite_frame(safe_read_csv(path))
@@ -251,7 +251,7 @@ def build_union(cfg: WorkflowConfig, target: str) -> dict[str, Any]:
 
     for source_cfg in cfg.data.get("feature_sources", []):
         name = str(source_cfg.get("name", "source"))
-        frame = source_feature_frame(source_cfg, target)
+        frame = source_feature_frame(cfg, source_cfg, target)
         if len(frame) != len(y):
             raise ValueError(f"{name} rows {len(frame)} != target rows {len(y)} for {target}")
         if source_cfg.get("include_features", True):

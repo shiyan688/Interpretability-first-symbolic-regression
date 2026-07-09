@@ -1,0 +1,10 @@
+{
+  "target": "y",
+  "selected_factors": [
+    {
+      "expression": "(raw_x1 * raw_x2)",
+      "reason": "keeps the known toy interaction in the PySR input pool",
+      "final_formula_allowed": true
+    }
+  ]
+}

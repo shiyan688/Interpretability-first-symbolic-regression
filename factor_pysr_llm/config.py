@@ -24,12 +24,28 @@ class WorkflowConfig:
         return cls(path=cfg_path, data=data)
 
     @property
+    def base_dir(self) -> Path:
+        return self.path.parent
+
+    def resolve_path(self, value: str | Path) -> Path:
+        """Resolve config paths relative to the config file.
+
+        This keeps example configs portable after cloning the repository and
+        avoids requiring users to edit machine-specific absolute paths.
+        """
+
+        raw = Path(value).expanduser()
+        if raw.is_absolute():
+            return raw
+        return (self.base_dir / raw).resolve()
+
+    @property
     def input_csv(self) -> Path:
-        return Path(self.data["input_csv"]).expanduser()
+        return self.resolve_path(self.data["input_csv"])
 
     @property
     def output_root(self) -> Path:
-        return Path(self.data["output_root"]).expanduser()
+        return self.resolve_path(self.data["output_root"])
 
     @property
     def targets(self) -> list[str]:
@@ -41,5 +57,4 @@ class WorkflowConfig:
     def format_path(self, value: str | None, target: str) -> Path | None:
         if not value:
             return None
-        return Path(str(value).format(target=target)).expanduser()
-
+        return self.resolve_path(str(value).format(target=target))
