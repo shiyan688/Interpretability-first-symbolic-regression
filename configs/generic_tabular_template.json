@@ -1,0 +1,80 @@
+{
+  "input_csv": "/path/to/data.csv",
+  "output_root": "/path/to/outputs/factor_pysr_llm/generic_run",
+  "targets": [
+    "target_y"
+  ],
+  "dataset": {
+    "format": "tabular_csv_v1",
+    "encoding": "utf-8-sig",
+    "id_columns": [
+      "structure_id",
+      "design_index",
+      "sample_id"
+    ],
+    "target_columns": [
+      "target_y"
+    ],
+    "target_rules": {
+      "prefixes": [],
+      "regex": [],
+      "exclude": []
+    },
+    "feature_rules": {
+      "include": [],
+      "regex": [],
+      "exclude": [],
+      "exclude_regex": [],
+      "numeric_only": true
+    },
+    "missing": {
+      "fill": "median",
+      "add_indicators": true
+    },
+    "scaling": "zscore",
+    "naming": {
+      "safe_prefix": "raw_",
+      "max_length": 96
+    }
+  },
+  "raw_feature_selection": {
+    "mode": "all"
+  },
+  "factor_mining": {
+    "base_top_k": 40,
+    "pair_top_k": 60,
+    "beam_width": 300,
+    "final_top_k": 1000,
+    "max_order": 2,
+    "unary_ops": [
+      "abs",
+      "square",
+      "inv",
+      "sqrt_abs",
+      "log_abs"
+    ],
+    "binary_ops": [
+      "+",
+      "-",
+      "*",
+      "/"
+    ],
+    "max_abs_value": 1000000000000.0
+  },
+  "factor_selection": {
+    "raw_top_fraction": 0.3,
+    "factor_top_k": 200,
+    "llm_keep_extra_top_k": 200
+  },
+  "pysr": {
+    "maxsize": 30,
+    "procs": 16,
+    "population_size": 300,
+    "populations": 32,
+    "niterations": 1000000,
+    "timeout_seconds": 86400,
+    "parsimony": 1e-6,
+    "model_selection": "accuracy",
+    "seed": 20260709
+  }
+}

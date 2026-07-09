@@ -1,0 +1,40 @@
+{
+  "input_csv": "/path/to/data.csv",
+  "output_root": "/path/to/outputs/history_union_run",
+  "targets": [
+    "target_y"
+  ],
+  "dedupe_exact_collision_values": true,
+  "raw_pysr": {
+    "name": "previous_raw_pysr",
+    "run_root": "/path/to/previous_raw_pysr_root",
+    "confirmed_csv": "/path/to/confirmed_best_expressions.csv",
+    "include_z_features": true,
+    "include_best_prediction": true
+  },
+  "feature_sources": [
+    {
+      "name": "previous_factor_run",
+      "feature_path": "/path/to/previous_factor_run/{target}/factor_data.csv",
+      "best_result_path": "/path/to/previous_factor_run/{target}/best_result.json",
+      "equations_path": "/path/to/previous_factor_run/{target}/model_equations_snapshot.csv",
+      "best_prediction_column": "previous_factor_best_pred",
+      "include_features": true,
+      "include_best_prediction": true,
+      "include_equation_predictions": true,
+      "top_equations": 12
+    }
+  ],
+  "pysr": {
+    "maxsize": 50,
+    "procs": 32,
+    "population_size": 1000,
+    "populations": 96,
+    "niterations": 12000000,
+    "timeout_seconds": 86400,
+    "parsimony": 1e-7,
+    "model_selection": "accuracy",
+    "seed": 20260709
+  }
+}
+
