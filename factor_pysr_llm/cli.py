@@ -16,6 +16,7 @@ from .llm_stages import (
     write_interpretability_prompt,
 )
 from .mining import mine_expression_list
+from .model_api import call_prompt_file
 from .pysr_runner import run_pysr
 from .reports import verify_expression, verify_hof, verify_result, write_verify_json
 
@@ -221,6 +222,18 @@ def cmd_llm_interpret(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def cmd_llm_call(args: argparse.Namespace) -> None:
+    result = call_prompt_file(
+        provider_config_path=Path(args.provider_config).expanduser(),
+        prompt_file=Path(args.prompt_file).expanduser(),
+        output_path=Path(args.output).expanduser(),
+        content_only=bool(args.content_only),
+        extract_json=bool(args.extract_json),
+        system_prompt=args.system_prompt,
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="factor-pysr-llm")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -312,6 +325,15 @@ def build_parser() -> argparse.ArgumentParser:
     interp.add_argument("--expr-list")
     interp.add_argument("--top-k", type=int, default=20)
     interp.set_defaults(func=cmd_llm_interpret)
+
+    lc = sub.add_parser("llm-call", help="Call an OpenAI-compatible chat API with a prompt file.")
+    lc.add_argument("--provider-config", default="configs/llm_provider.local.json")
+    lc.add_argument("--prompt-file", required=True)
+    lc.add_argument("--output", required=True)
+    lc.add_argument("--content-only", action="store_true")
+    lc.add_argument("--extract-json", action="store_true")
+    lc.add_argument("--system-prompt")
+    lc.set_defaults(func=cmd_llm_call)
 
     m = sub.add_parser("mine-exprs", help="Collect best/HOF expressions across result folders.")
     m.add_argument("--roots", nargs="+", required=True)

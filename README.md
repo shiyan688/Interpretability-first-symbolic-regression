@@ -47,6 +47,63 @@ python -m factor_pysr_llm.cli --help
 
 ## 典型流程
 
+### LLM API 配置
+
+LLM API 不写在数据集 config 里，单独放在 provider config 里，避免和实验配置混在一起。
+
+仓库提供两个示例：
+
+- `configs/llm_provider.example.json`：OpenAI-compatible 默认示例。
+- `configs/llm_provider.deepseek.example.json`：DeepSeek/OpenAI-compatible 示例。
+
+使用方式：
+
+```bash
+cp configs/llm_provider.example.json configs/llm_provider.local.json
+```
+
+然后二选一：
+
+1. 推荐：只填环境变量名，不把 key 写进文件。
+
+```json
+{
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "api_key": "",
+  "model": "gpt-4o-mini"
+}
+```
+
+运行前设置：
+
+```bash
+export OPENAI_API_KEY="your_api_key_here"
+```
+
+2. 本地临时使用：把 key 填到 `configs/llm_provider.local.json` 的 `api_key` 字段。
+
+`configs/llm_provider.local.json` 已经写进 `.gitignore`，不会被提交到仓库。
+
+调用一个 prompt 文件：
+
+```bash
+python -m factor_pysr_llm.cli llm-call \
+  --provider-config configs/llm_provider.local.json \
+  --prompt-file outputs/toy_regression_run/llm_prompts/y/factor_proposal_prompt.md \
+  --output outputs/toy_regression_run/llm_prompts/y/factor_proposals.llm.json \
+  --extract-json
+```
+
+`--extract-json` 会从模型回复里提取 JSON，适合直接接到：
+
+```bash
+python -m factor_pysr_llm.cli mine-factors \
+  --config configs/generic_tabular_template.json \
+  --target y \
+  --llm-proposals outputs/toy_regression_run/llm_prompts/y/factor_proposals.llm.json
+```
+
 ### 30 秒 Demo
 
 仓库自带一个小型 toy CSV：`examples/toy_regression.csv`。路径全部是相对路径，

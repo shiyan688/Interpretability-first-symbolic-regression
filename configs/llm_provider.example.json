@@ -1,0 +1,12 @@
+{
+  "provider": "openai_compatible",
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "api_key": "",
+  "model": "gpt-4o-mini",
+  "temperature": 0.2,
+  "max_tokens": 2000,
+  "timeout_seconds": 120,
+  "system_prompt": "You are a careful scientific symbolic-regression assistant. Return concise, valid JSON when the prompt asks for JSON."
+}
+

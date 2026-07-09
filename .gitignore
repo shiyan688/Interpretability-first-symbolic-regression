@@ -13,4 +13,6 @@ outputs/
 runs/
 *.log
 *.pid
+.env
+configs/llm_provider.local.json
 
