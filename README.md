@@ -99,39 +99,41 @@ python -m factor_pysr_llm.cli llm-call \
 
 ```bash
 python -m factor_pysr_llm.cli mine-factors \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y \
   --llm-proposals outputs/toy_regression_run/llm_prompts/y/factor_proposals.llm.json
 ```
 
 ### 30 秒 Demo
 
-仓库自带一个小型 toy CSV：`examples/toy_regression.csv`。路径全部是相对路径，
+仓库自带一个完整 toy 示例，详见 `examples/README.md`。核心文件包括
+`examples/toy_regression.csv`、`examples/toy_config.json`、`examples/factor_proposals.example.json`
+和 `examples/factor_selection.example.json`。路径全部是相对路径，
 用户 clone 后可以直接跑数据解析、因子挖掘、LLM prompt 生成和 PySR 输入表构建：
 
 ```bash
 python -m factor_pysr_llm.cli inspect-dataset \
-  --config configs/generic_tabular_template.json
+  --config examples/toy_config.json
 
 python -m factor_pysr_llm.cli build-raw \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y
 
 python -m factor_pysr_llm.cli llm-propose-factors \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y
 
 python -m factor_pysr_llm.cli mine-factors \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y \
   --llm-proposals examples/factor_proposals.example.json
 
 python -m factor_pysr_llm.cli llm-select-factors \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y
 
 python -m factor_pysr_llm.cli build-pysr-pool \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y \
   --llm-selection examples/factor_selection.example.json
 ```
@@ -140,7 +142,7 @@ python -m factor_pysr_llm.cli build-pysr-pool \
 
 ```bash
 python -m factor_pysr_llm.cli run-pysr \
-  --config configs/generic_tabular_template.json \
+  --config examples/toy_config.json \
   --target y \
   --run-name pysr_toy_factor_pool
 ```

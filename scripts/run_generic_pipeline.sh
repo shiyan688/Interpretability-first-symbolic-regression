@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PYTHON="${PYTHON:-python}"
-CONFIG="${CONFIG:-configs/generic_tabular_template.json}"
+CONFIG="${CONFIG:-examples/toy_config.json}"
 TARGET="${TARGET:-y}"
 RUN_NAME="${RUN_NAME:-pysr_factor_pool_${TARGET}}"
 LLM_PROPOSALS="${LLM_PROPOSALS:-examples/factor_proposals.example.json}"

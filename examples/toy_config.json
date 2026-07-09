@@ -1,8 +1,8 @@
 {
-  "input_csv": "../data/my_data.csv",
-  "output_root": "../outputs/my_symbolic_regression_run",
+  "input_csv": "toy_regression.csv",
+  "output_root": "../outputs/toy_regression_run",
   "targets": [
-    "target_y"
+    "y"
   ],
   "dataset": {
     "format": "tabular_csv_v1",
@@ -11,7 +11,7 @@
       "sample_id"
     ],
     "target_columns": [
-      "target_y"
+      "y"
     ],
     "target_rules": {
       "prefixes": [],
@@ -39,10 +39,10 @@
     "mode": "all"
   },
   "factor_mining": {
-    "base_top_k": 40,
-    "pair_top_k": 60,
-    "beam_width": 300,
-    "final_top_k": 1000,
+    "base_top_k": 20,
+    "pair_top_k": 30,
+    "beam_width": 120,
+    "final_top_k": 300,
     "max_order": 2,
     "unary_ops": [
       "abs",
@@ -66,13 +66,14 @@
   },
   "pysr": {
     "maxsize": 30,
-    "procs": 16,
-    "population_size": 300,
-    "populations": 32,
-    "niterations": 1000000,
-    "timeout_seconds": 86400,
+    "procs": 4,
+    "population_size": 80,
+    "populations": 12,
+    "niterations": 10000,
+    "timeout_seconds": 600,
     "parsimony": 1e-6,
     "model_selection": "accuracy",
     "seed": 20260709
   }
 }
+
