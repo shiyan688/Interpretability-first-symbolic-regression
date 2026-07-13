@@ -126,8 +126,13 @@ def _make_candidate(
     y: np.ndarray,
     source: str,
     index: int,
+    score_mask: np.ndarray | None = None,
 ) -> Candidate:
-    score, corr = _corr_score(values, y)
+    if score_mask is None:
+        score, corr = _corr_score(values, y)
+    else:
+        m = np.asarray(score_mask, dtype=bool)
+        score, corr = _corr_score(np.asarray(values, dtype=float)[m], np.asarray(y, dtype=float)[m])
     _, mean, std = _zscore(values)
     return Candidate(
         name=f"factor_{index:06d}",
@@ -159,7 +164,15 @@ def mine_factors_from_frame(
     X: pd.DataFrame,
     y: np.ndarray,
     options: dict[str, Any] | None = None,
+    train_mask: np.ndarray | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Mine candidate factors.
+
+    If ``train_mask`` is given, ALL correlation scores (base ranking and beam
+    search selection) are computed on train rows only, so test labels never
+    influence which factors are mined or kept. The output factor values still
+    span all rows (needed downstream for validation/test evaluation).
+    """
     opts = dict(options or {})
     base_top_k = int(opts.get("base_top_k", min(40, X.shape[1])))
     pair_top_k = int(opts.get("pair_top_k", min(60, base_top_k)))
@@ -172,10 +185,19 @@ def mine_factors_from_frame(
 
     X = finite_frame(X)
     yy = np.asarray(y, dtype=float)
+    if train_mask is None:
+        score_mask = np.ones(len(yy), dtype=bool)
+    else:
+        score_mask = np.asarray(train_mask, dtype=bool)
+    y_score = yy[score_mask]
+
+    def score_values(values: np.ndarray) -> tuple[float, float]:
+        return _corr_score(np.asarray(values, dtype=float)[score_mask], y_score)
+
     raw_scores = []
     for col in X.columns:
         values = X[col].to_numpy(dtype=float)
-        score, corr = _corr_score(values, yy)
+        score, corr = score_values(values)
         if score > 0.0:
             raw_scores.append((score, corr, str(col), values))
     raw_scores.sort(reverse=True, key=lambda item: item[0])
@@ -192,7 +214,7 @@ def mine_factors_from_frame(
         sig = _signature(values)
         if sig in seen_sig:
             continue
-        cand = _make_candidate(col, values, 0, yy, "raw_base", next_index)
+        cand = _make_candidate(col, values, 0, yy, "raw_base", next_index, score_mask)
         next_index += 1
         cand.score_abs_corr = score
         cand.signed_corr = corr
@@ -219,7 +241,7 @@ def mine_factors_from_frame(
                 sig = _signature(values)
                 if sig in seen_sig:
                     continue
-                new = _make_candidate(expr, values, order, yy, f"unary:{op_name}", next_index)
+                new = _make_candidate(expr, values, order, yy, f"unary:{op_name}", next_index, score_mask)
                 next_index += 1
                 generated.append(new)
                 seen_expr.add(expr)
@@ -235,7 +257,7 @@ def mine_factors_from_frame(
                     sig = _signature(values)
                     if sig in seen_sig:
                         continue
-                    new = _make_candidate(expr, values, order, yy, "binary", next_index)
+                    new = _make_candidate(expr, values, order, yy, "binary", next_index, score_mask)
                     next_index += 1
                     generated.append(new)
                     seen_expr.add(expr)
@@ -260,6 +282,8 @@ def mine_factors_from_frame(
         "options": opts,
         "per_order_counts": per_order_counts,
         "value_policy": "mined factor values are z-scored before output",
+        "scored_on": "train_rows_only" if train_mask is not None else "all_rows",
+        "n_scoring_rows": int(score_mask.sum()),
     }
     return rows, values, manifest
 
@@ -292,6 +316,7 @@ def proposed_factor_frame(
     X: pd.DataFrame,
     y: np.ndarray,
     proposals_path: Path | None,
+    train_mask: np.ndarray | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not proposals_path:
         return pd.DataFrame(index=X.index), pd.DataFrame()
@@ -340,7 +365,11 @@ def proposed_factor_frame(
             )
             continue
         z, _, _ = _zscore(values)
-        score, corr = _corr_score(values, y)
+        if train_mask is None:
+            score, corr = _corr_score(values, y)
+        else:
+            m = np.asarray(train_mask, dtype=bool)
+            score, corr = _corr_score(np.asarray(values, dtype=float)[m], np.asarray(y, dtype=float)[m])
         cols[name] = z
         used.add(name)
         rows.append(
@@ -358,6 +387,19 @@ def proposed_factor_frame(
     return pd.DataFrame(cols), pd.DataFrame(rows)
 
 
+def _train_mask_from_feature_dir(feature_dir: Path, n_rows: int) -> np.ndarray | None:
+    """Read row_roles.csv (written by the no-leakage builder) into a train mask."""
+    roles_path = feature_dir / "row_roles.csv"
+    if not roles_path.exists():
+        return None
+    roles = safe_read_csv(roles_path)
+    col = "role" if "role" in roles.columns else roles.columns[0]
+    values = roles[col].astype(str).tolist()
+    if len(values) != n_rows:
+        raise ValueError(f"row_roles.csv length {len(values)} != feature rows {n_rows}")
+    return np.array([v == "train" for v in values], dtype=bool)
+
+
 def mine_factors(
     cfg: WorkflowConfig,
     target: str,
@@ -366,11 +408,12 @@ def mine_factors(
 ) -> dict[str, Any]:
     feature_dir = feature_dir or (cfg.output_root / "feature_tables" / target)
     X, y = read_feature_dir(feature_dir)
-    proposed_X, proposal_report = proposed_factor_frame(X, y, llm_proposals_path)
+    train_mask = _train_mask_from_feature_dir(feature_dir, len(X))
+    proposed_X, proposal_report = proposed_factor_frame(X, y, llm_proposals_path, train_mask)
     if not proposed_X.empty:
         X = pd.concat([X.reset_index(drop=True), proposed_X.reset_index(drop=True)], axis=1)
     factor_cfg = dict(cfg.data.get("factor_mining") or {})
-    rows, values, manifest = mine_factors_from_frame(X, y, factor_cfg)
+    rows, values, manifest = mine_factors_from_frame(X, y, factor_cfg, train_mask=train_mask)
     out_dir = cfg.output_root / "factor_pools" / target
     out_dir.mkdir(parents=True, exist_ok=True)
     rows.to_csv(out_dir / "mined_factors.csv", index=False)

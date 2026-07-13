@@ -209,7 +209,19 @@ def apply_feature_selection(
     }
 
 
-def build_raw_feature_table(cfg: WorkflowConfig, target: str) -> dict[str, Any]:
+def build_raw_feature_table(
+    cfg: WorkflowConfig,
+    target: str,
+    split_manifest_path: "Path | None" = None,
+) -> dict[str, Any]:
+    """Build the raw feature table for a target.
+
+    If ``split_manifest_path`` is provided, all missing-value fill, scaling and
+    correlation-based feature selection are fit on TRAIN rows only and then
+    applied deterministically to all rows (no-leakage path). The resulting
+    feature table still contains all target-finite rows; downstream code uses
+    the split manifest to restrict training/selection/test evaluation.
+    """
     grammar = DatasetGrammar.from_config(cfg)
     df = read_input_csv(cfg, grammar)
     targets = infer_target_columns(df, grammar)
@@ -225,6 +237,11 @@ def build_raw_feature_table(cfg: WorkflowConfig, target: str) -> dict[str, Any]:
     work = df.loc[ok].reset_index(drop=True)
     y = pd.to_numeric(work[target], errors="coerce").to_numpy(dtype=float)
     feature_cols = infer_feature_columns(work, target, grammar, targets)
+
+    if split_manifest_path is not None:
+        return _build_raw_feature_table_split(
+            cfg, target, grammar, df, work, y, feature_cols, split_manifest_path
+        )
 
     used: set[str] = set()
     cols: dict[str, np.ndarray] = {}
@@ -305,6 +322,117 @@ def build_raw_feature_table(cfg: WorkflowConfig, target: str) -> dict[str, Any]:
         "n_features": int(X.shape[1]),
         "linear_r2": linear_r2,
         "linear_rmse": linear_rmse,
+    }
+
+
+def _build_raw_feature_table_split(
+    cfg: WorkflowConfig,
+    target: str,
+    grammar: DatasetGrammar,
+    df: pd.DataFrame,
+    work: pd.DataFrame,
+    y: np.ndarray,
+    feature_cols: list[str],
+    split_manifest_path: "Path",
+) -> dict[str, Any]:
+    """No-leakage variant: fit preprocessing on train rows, transform all rows."""
+    from .preprocess import fit_feature_selection, fit_preprocess, transform_preprocess
+    from .splits import load_split_manifest, role_masks_for_frame
+
+    manifest_obj = load_split_manifest(Path(split_manifest_path))
+    masks = role_masks_for_frame(manifest_obj, work)
+    train_mask = masks["train"]
+    if int(train_mask.sum()) < 3:
+        raise ValueError(f"split has fewer than 3 train rows for target {target}")
+
+    # pre-compute safe names for every candidate column and its missing indicator
+    used: set[str] = set()
+    safe_names: dict[str, str] = {}
+    for col in feature_cols:
+        safe_names[col] = safe_feature_name(col, used, grammar)
+        safe_names[f"{col}__is_missing"] = safe_feature_name(f"{col}__is_missing", used, grammar)
+
+    state = fit_preprocess(
+        work,
+        feature_cols,
+        train_mask,
+        safe_names,
+        missing_fill=grammar.missing_fill,
+        scaling=grammar.scaling,
+        add_missing_indicators=grammar.add_missing_indicators,
+    )
+    X_all = transform_preprocess(work, state)
+    if X_all.shape[1] == 0:
+        raise RuntimeError(f"no usable raw features for target {target}")
+
+    keep, selection_manifest = fit_feature_selection(
+        X_all, y, train_mask, dict(cfg.data.get("raw_feature_selection") or {})
+    )
+    X_all = X_all[keep].copy()
+    state.selected_features = keep
+    state.selection_manifest = selection_manifest
+
+    # linear R2 reported on TRAIN rows only (no leakage into a headline number)
+    Xtr = X_all.to_numpy(dtype=float)[train_mask]
+    ytr = np.asarray(y, dtype=float)[train_mask]
+    lin = LinearRegression().fit(Xtr, ytr)
+    pred_tr = lin.predict(Xtr)
+    linear_r2 = float(r2_score(ytr, pred_tr))
+    linear_rmse = float(math.sqrt(mean_squared_error(ytr, pred_tr)))
+
+    out_dir = cfg.output_root / "feature_tables" / target
+    out_dir.mkdir(parents=True, exist_ok=True)
+    X_all.to_csv(out_dir / "features.csv", index=False)
+    X_all.to_csv(out_dir / "hybrid_features.csv", index=False)
+    pd.DataFrame({"target": y}).to_csv(out_dir / "y.csv", index=False)
+    role = np.array(["unassigned"] * len(work), dtype=object)
+    role[masks["train"]] = "train"
+    role[masks["validation"]] = "validation"
+    role[masks["test"]] = "test"
+    pd.DataFrame({"role": role}).to_csv(out_dir / "row_roles.csv", index=False)
+
+    feature_name_map = {k: v for k, v in state.feature_name_map.items() if k in X_all.columns}
+    manifest: dict[str, Any] = {
+        "target": target,
+        "input_csv": str(cfg.input_csv),
+        "config_path": str(cfg.path),
+        "builder": "raw_dataset_grammar_train_fit",
+        "split_manifest": str(split_manifest_path),
+        "split_sha256": manifest_obj.content_sha256(),
+        "n_input_rows": int(len(df)),
+        "n_rows": int(len(X_all)),
+        "n_train_rows": int(train_mask.sum()),
+        "n_validation_rows": int(masks["validation"].sum()),
+        "n_test_rows": int(masks["test"].sum()),
+        "n_features": int(X_all.shape[1]),
+        "n_candidate_feature_columns": int(len(feature_cols)),
+        "train_linear_r2": linear_r2,
+        "train_linear_rmse": linear_rmse,
+        "dataset_grammar": grammar.__dict__,
+        "feature_selection": selection_manifest,
+        "feature_source": {col: "raw_dataset" for col in X_all.columns},
+        "feature_name_map": feature_name_map,
+        "fill_values": {k: v for k, v in state.fill_values.items() if k in X_all.columns},
+        "x_mean": {k: v for k, v in state.means.items() if k in X_all.columns},
+        "x_scale": {k: v for k, v in state.scales.items() if k in X_all.columns},
+        "dropped_features": state.dropped,
+        "preprocess_state": state.to_dict(),
+        "notes": [
+            "No-leakage build: fill/scale/selection fit on train rows only.",
+            "Feature table contains all target-finite rows; use row_roles.csv / split manifest downstream.",
+            "train_linear_r2 is computed on train rows only.",
+        ],
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {
+        "target": target,
+        "feature_dir": str(out_dir),
+        "n_rows": int(len(X_all)),
+        "n_train_rows": int(train_mask.sum()),
+        "n_features": int(X_all.shape[1]),
+        "linear_r2": linear_r2,
+        "linear_rmse": linear_rmse,
+        "split_sha256": manifest_obj.content_sha256(),
     }
 
 

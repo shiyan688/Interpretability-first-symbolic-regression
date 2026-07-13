@@ -19,6 +19,7 @@ from .mining import mine_expression_list
 from .model_api import call_prompt_file
 from .pysr_runner import run_pysr
 from .reports import verify_expression, verify_hof, verify_result, write_verify_json
+from .splits import build_split_manifest, save_split_manifest
 
 
 def _add_common_config(p: argparse.ArgumentParser) -> None:
@@ -69,9 +70,11 @@ def cmd_inspect_dataset(args: argparse.Namespace) -> None:
 
 def cmd_build_raw(args: argparse.Namespace) -> None:
     cfg = WorkflowConfig.from_json(args.config)
+    split_manifest = getattr(args, "split_manifest", None)
+    split_path = Path(split_manifest).expanduser() if split_manifest else None
     rows = []
     for target in _targets_from_args(cfg, args):
-        row = build_raw_feature_table(cfg, target)
+        row = build_raw_feature_table(cfg, target, split_manifest_path=split_path)
         rows.append(row)
         print(
             f"{target}: feature_dir={row['feature_dir']} rows={row['n_rows']} "
@@ -222,6 +225,30 @@ def cmd_llm_interpret(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def cmd_generate_split(args: argparse.Namespace) -> None:
+    cfg = WorkflowConfig.from_json(args.config)
+    fractions = (args.train_fraction, args.validation_fraction, args.test_fraction)
+    manifest = build_split_manifest(
+        cfg,
+        args.target,
+        mode=args.mode,
+        seed=args.seed,
+        fractions=fractions,
+        id_column=args.id_column,
+        group_column=args.group_column,
+    )
+    if args.output:
+        out_path = Path(args.output).expanduser()
+    else:
+        out_path = cfg.output_root / "splits" / f"{args.target}__{args.mode}_seed{args.seed}.json"
+    payload = save_split_manifest(manifest, out_path)
+    print(
+        f"{args.target}: mode={manifest.mode} n_total={manifest.n_total} "
+        f"train={payload['n_train']} val={payload['n_validation']} test={payload['n_test']} "
+        f"sha256={payload['sha256'][:12]} -> {out_path}"
+    )
+
+
 def cmd_llm_call(args: argparse.Namespace) -> None:
     result = call_prompt_file(
         provider_config_path=Path(args.provider_config).expanduser(),
@@ -247,7 +274,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_config(raw)
     raw.add_argument("--target")
     raw.add_argument("--targets", nargs="*")
+    raw.add_argument("--split-manifest", help="Split manifest JSON for no-leakage train-fit preprocessing.")
     raw.set_defaults(func=cmd_build_raw)
+
+    gs = sub.add_parser("generate-split", help="Generate a reproducible train/validation/test split manifest.")
+    _add_common_config(gs)
+    gs.add_argument("--target", required=True)
+    gs.add_argument("--mode", choices=["random", "group"], default="random")
+    gs.add_argument("--seed", type=int, default=20260709)
+    gs.add_argument("--train-fraction", type=float, default=0.6, dest="train_fraction")
+    gs.add_argument("--validation-fraction", type=float, default=0.2, dest="validation_fraction")
+    gs.add_argument("--test-fraction", type=float, default=0.2, dest="test_fraction")
+    gs.add_argument("--id-column", dest="id_column")
+    gs.add_argument("--group-column", dest="group_column")
+    gs.add_argument("--output")
+    gs.set_defaults(func=cmd_generate_split)
 
     lp = sub.add_parser("llm-propose-factors", help="Write prompt/template for LLM feature-factor proposal.")
     _add_common_config(lp)

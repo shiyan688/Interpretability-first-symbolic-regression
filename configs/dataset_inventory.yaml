@@ -1,0 +1,83 @@
+# Dataset inventory for IF-SR.
+#
+# One entry PER SOURCE TABLE. Multiple targets that share the same source table
+# MUST be listed as multiple targets under a single source entry, NOT as
+# separate datasets (paper_scope forbids inflating dataset counts).
+#
+# unit_status is one of: known | unknown | inferred
+# public is one of: yes | no | on_request
+#
+# The 6 main real tasks (experiment 1) must be selected here with a reason
+# recorded BEFORE any final method result is inspected.
+
+meta:
+  frozen_on: "2026-07-13"
+  domain: "catalysis / materials (single domain, per paper_scope)"
+  status: template_with_dev_example
+  notes: >
+    Real catalysis source tables are not yet copied into this repository. Each
+    real candidate below is a placeholder skeleton that must be filled with the
+    concrete file path, source dataset ID, sample count and variable dictionary
+    before it can be promoted to a main task. The toy dataset is a development
+    example only and must never enter a confirmatory main table.
+
+sources:
+  - source_id: toy_regression
+    development_only: true
+    files:
+      - path: "examples/toy_regression.csv"
+    source_dataset_id: "toy_synthetic_v1"
+    description: "Synthetic y = x1 * x2 + noise. Development / smoke only."
+    n_samples: 30
+    raw_variables:
+      - name: x1
+        meaning: "synthetic monotonic driver"
+        unit_status: unknown
+      - name: x2
+        meaning: "synthetic oscillatory driver"
+        unit_status: unknown
+      - name: x3
+        meaning: "synthetic correlated variable"
+        unit_status: unknown
+    targets:
+      - name: y
+        meaning: "synthetic response"
+        unit_status: unknown
+    group_split_candidate_fields: []
+    shares_source_table_with_other_targets: false
+    public: yes
+    selected_as_main_task: false
+    selection_reason: "Development smoke dataset; excluded from all main tables."
+
+  # ----- Real candidate skeletons (fill before promotion) -----
+  - source_id: real_candidate_01
+    development_only: false
+    files:
+      - path: "TODO: path/to/source_table_01.csv"
+    source_dataset_id: "TODO"
+    description: "TODO: real catalysis/materials source table."
+    n_samples: null
+    raw_variables: []      # TODO: list name / meaning / unit_status
+    targets:
+      - name: "TODO_target_a"
+        meaning: "TODO"
+        unit_status: unknown
+    group_split_candidate_fields: []   # e.g. material, support, active_phase, batch
+    shares_source_table_with_other_targets: false
+    public: on_request
+    selected_as_main_task: false
+    selection_reason: "TODO: record reason before looking at final results."
+
+# Explicit list of the 6 frozen main tasks (experiment 1). Populate with
+# (source_id, target) pairs. Selection reasons must cover a spread of sample
+# size, predictability and target type, and must be written before final
+# results are inspected.
+main_real_tasks:
+  frozen: false      # set true once all 6 are filled and reviewed
+  required_count: 6
+  selection_criteria:
+    - "Cover a range of sample sizes."
+    - "Cover a range of predictability (easy / medium / hard)."
+    - "Cover different target types."
+    - "No two main tasks may share a source table unless explicitly justified."
+  tasks: []          # e.g. [{source_id: real_candidate_01, target: TODO_target_a, reason: "..."}]

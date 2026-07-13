@@ -1,0 +1,181 @@
+# Known-formula tasks for experiment 2 (IF-SR).
+#
+# Goal: freeze 20 medium/high complexity ground-truth formulas via a
+# REPRODUCIBLE stratified sampler. No human may inspect candidate results and
+# then hand-pick tasks. The sampler (factor_pysr_llm/known_formulas.py) draws
+# with a fixed seed, stratified by variable count, node count and operator type.
+
+meta:
+  frozen_on: "2026-07-13"
+  status: rules_frozen_list_pending
+  n_tasks: 20
+  n_tasks_minimum_after_reduction: 15
+  benchmark_source: "Feynman Symbolic Regression Database (public)"
+  anti_cherry_pick: >
+    Tasks are drawn by a fixed-seed stratified sampler. Variables are randomly
+    renamed and formula names/domains hidden before rating so LLMs cannot recall
+    the answer. No hand selection after seeing method results.
+
+# Sampler configuration. Frozen.
+sampler:
+  module: "factor_pysr_llm.known_formulas"
+  function: "sample_known_formula_tasks"
+  seed: 20260709
+  n_select: 20
+  strata:
+    variable_count:
+      # bins over number of distinct input variables
+      bins: [[1, 2], [3, 4], [5, 99]]
+      proportions: [0.25, 0.5, 0.25]
+    node_count:
+      # bins over expression tree node count (medium/high complexity)
+      min_nodes: 6
+      bins: [[6, 10], [11, 16], [17, 99]]
+      proportions: [0.4, 0.4, 0.2]
+    operator_type:
+      # each selected task pool must include these operator classes
+      require_at_least_one_of: [transcendental, power, rational]
+
+# Frozen data-generation setting (mirrors paper_scope).
+data_generation:
+  target_noise: 0.05
+  n_irrelevant_variables: 5
+  n_train: 400
+  n_validation: 200
+  n_test: 400
+  independent_exprsim_points: 400   # sampled independently of train/val/test
+  sampling_seed_base: 20260709
+
+# Candidate pool. This is a compact frozen catalog of Feynman-style formulas
+# used by the deterministic sampler. expression uses variable names v1..vk.
+# node_count is the pre-computed expanded node count used for stratification.
+candidate_pool:
+  - task_id: F_I_6_2      # gaussian
+    expression: "exp(-(v1/v2)^2/2)/(sqrt(2*pi)*v2)"
+    n_variables: 2
+    node_count: 12
+    operators: [exp, power, rational, transcendental]
+  - task_id: F_I_12_11
+    expression: "v1*(v2 + v3*v4*sin(v5))"
+    n_variables: 5
+    node_count: 10
+    operators: [transcendental]
+  - task_id: F_I_15_3x
+    expression: "(v1 - v2*v3)/sqrt(1 - v2^2/v4^2)"
+    n_variables: 4
+    node_count: 12
+    operators: [power, rational]
+  - task_id: F_I_29_16
+    expression: "sqrt(v1^2 + v2^2 - 2*v1*v2*cos(v3 - v4))"
+    n_variables: 4
+    node_count: 14
+    operators: [power, transcendental]
+  - task_id: F_I_34_8
+    expression: "v1*v2*v3/v4"
+    n_variables: 4
+    node_count: 7
+    operators: [rational]
+  - task_id: F_I_40_1
+    expression: "v1*exp(-v2*v3*v4/(v5*v6))"
+    n_variables: 6
+    node_count: 12
+    operators: [exp, rational, transcendental]
+  - task_id: F_I_44_4
+    expression: "v1*v2*v3*log(v4/v5)"
+    n_variables: 5
+    node_count: 9
+    operators: [transcendental]
+  - task_id: F_I_50_26
+    expression: "v1*(cos(v2*v3) + v4*cos(v2*v3)^2)"
+    n_variables: 4
+    node_count: 13
+    operators: [transcendental, power]
+  - task_id: F_II_2_42
+    expression: "v1*(v2 - v3)*v4/v5"
+    n_variables: 5
+    node_count: 9
+    operators: [rational]
+  - task_id: F_II_6_15a
+    expression: "v1*v2/(4*pi*v3)*3*v4/sqrt(v4^2+v5^2)"
+    n_variables: 5
+    node_count: 15
+    operators: [power, rational]
+  - task_id: F_II_11_27
+    expression: "v1*v2/(1 - v1*v2/3)*v3"
+    n_variables: 3
+    node_count: 11
+    operators: [rational]
+  - task_id: F_II_11_28
+    expression: "1 + v1*v2/(1 - v1*v2/3)"
+    n_variables: 2
+    node_count: 11
+    operators: [rational]
+  - task_id: F_II_35_21
+    expression: "v1*v2*tanh(v2*v3/(v4*v5))"
+    n_variables: 5
+    node_count: 12
+    operators: [transcendental, rational]
+  - task_id: F_III_9_52
+    expression: "v1*v2*v3/v4*sin((v5-v6)*v7/2)^2/((v5-v6)*v7/2)^2"
+    n_variables: 7
+    node_count: 18
+    operators: [transcendental, power, rational]
+  - task_id: F_III_10_19
+    expression: "v1*sqrt(v2^2 + v3^2 + v4^2)"
+    n_variables: 4
+    node_count: 11
+    operators: [power]
+  - task_id: F_III_17_37
+    expression: "v1*(1 + v2*cos(v3))"
+    n_variables: 3
+    node_count: 8
+    operators: [transcendental]
+  - task_id: F_B_8_14
+    expression: "1/(4*pi*v1)*v2/v3^2"
+    n_variables: 3
+    node_count: 10
+    operators: [power, rational]
+  - task_id: F_B_13_12
+    expression: "v1*v2*v3*(1/v4 - 1/v5)"
+    n_variables: 5
+    node_count: 12
+    operators: [rational]
+  - task_id: F_B_15_2p
+    expression: "v1*v2^2/2 + v3*v4*cos(v5)"
+    n_variables: 5
+    node_count: 13
+    operators: [power, transcendental]
+  - task_id: F_B_29_5
+    expression: "v1*(1 - v2)/(v3*(1 + v2))"
+    n_variables: 3
+    node_count: 11
+    operators: [rational]
+  - task_id: F_I_26_2
+    expression: "asin(v1*sin(v2))"
+    n_variables: 2
+    node_count: 6
+    operators: [transcendental]
+  - task_id: F_I_39_22
+    expression: "v1*v2*v3/v4"
+    n_variables: 4
+    node_count: 7
+    operators: [rational]
+  - task_id: F_II_38_3
+    expression: "v1*v2*v3/v4"
+    n_variables: 4
+    node_count: 7
+    operators: [rational]
+  - task_id: F_I_43_31
+    expression: "v1*v2*v3"
+    n_variables: 3
+    node_count: 5
+    operators: [rational]
+  - task_id: F_II_34_11
+    expression: "v1*v2*v3/(2*v4)"
+    n_variables: 4
+    node_count: 9
+    operators: [rational]
+
+# Frozen selected list. Empty until the sampler is run and its output is
+# committed. Populate via: cli sample-known-formulas.
+selected_tasks: []
