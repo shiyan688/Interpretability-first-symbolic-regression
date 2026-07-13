@@ -1,11 +1,53 @@
 from __future__ import annotations
 
 import re
+import signal
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
 
 from .expr import eval_expr, to_python_expr
+
+
+class _SympyTimeout(Exception):
+    pass
+
+
+@contextmanager
+def _time_limit(seconds: float):
+    """Hard wall-clock limit for a block (main thread only).
+
+    sympy.simplify can hang indefinitely on pathological LLM-generated
+    expressions; this guard converts such hangs into a catchable exception so
+    ExprSim degrades gracefully instead of stalling the whole run.
+    """
+    def _handler(signum, frame):
+        raise _SympyTimeout()
+
+    has_alarm = hasattr(signal, "SIGALRM")
+    old = None
+    if has_alarm:
+        old = signal.signal(signal.SIGALRM, _handler)
+        signal.setitimer(signal.ITIMER_REAL, float(seconds))
+    try:
+        yield
+    finally:
+        if has_alarm:
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            if old is not None:
+                signal.signal(signal.SIGALRM, old)
+
+
+def _safe_simplify(expr, seconds: float = 5.0):
+    """simplify with a hard timeout; return the unsimplified expr on timeout."""
+    import sympy as sp
+
+    try:
+        with _time_limit(seconds):
+            return sp.simplify(expr)
+    except (_SympyTimeout, Exception):
+        return expr
 
 # Expression similarity (ExprSim) for experiment 2
 # ------------------------------------------------
@@ -90,14 +132,14 @@ def tree_structure_similarity(pred: str, truth: str) -> float:
     try:
         import sympy as sp
 
-        p = sp.simplify(_sympy_tree(pred))
-        t = sp.simplify(_sympy_tree(truth))
+        p = _safe_simplify(_sympy_tree(pred))
+        t = _safe_simplify(_sympy_tree(truth))
         np_nodes = _node_count(p)
         nt_nodes = _node_count(t)
         if np_nodes == 0 and nt_nodes == 0:
             return 1.0
         # difference of the simplified difference: if algebraically equal, diff==0
-        diff = sp.simplify(p - t)
+        diff = _safe_simplify(p - t)
         if diff == 0:
             return 1.0
         denom = max(np_nodes, nt_nodes)
@@ -177,7 +219,7 @@ def algebraic_equivalence(pred: str, truth: str) -> bool:
     try:
         import sympy as sp
 
-        diff = sp.simplify(_sympy_tree(pred) - _sympy_tree(truth))
+        diff = _safe_simplify(_sympy_tree(pred) - _sympy_tree(truth))
         return bool(diff == 0)
     except Exception:
         return False

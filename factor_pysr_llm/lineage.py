@@ -152,10 +152,10 @@ def _sympy_expr(expression: str):
 def canonicalize(expression: str) -> str:
     """Basic canonicalization via sympy. Falls back to the raw string."""
     try:
-        import sympy as sp
+        from .expression_similarity import _safe_simplify
 
         expr = _sympy_expr(expression)
-        return str(sp.simplify(expr))
+        return str(_safe_simplify(expr))
     except Exception:
         return expression
 
