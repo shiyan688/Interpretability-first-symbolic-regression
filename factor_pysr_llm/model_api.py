@@ -72,12 +72,35 @@ def call_openai_compatible(
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_seconds", 120))) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM API HTTP {exc.code}: {detail}") from exc
+    # Retry with exponential backoff on transient network / rate-limit errors
+    # (e.g. ConnectionRefusedError 111 when the provider throttles bursts, or
+    # HTTP 429/5xx). Deterministic failures (4xx other than 429) are not retried.
+    import time as _time
+
+    max_retries = int(cfg.get("max_retries", 5))
+    backoff = float(cfg.get("retry_backoff_seconds", 3.0))
+    raw = None
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_seconds", 120))) as resp:
+                raw = resp.read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                last_exc = RuntimeError(f"LLM API HTTP {exc.code}: {detail}")
+                _time.sleep(backoff * attempt)
+                continue
+            raise RuntimeError(f"LLM API HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                _time.sleep(backoff * attempt)
+                continue
+            raise
+    if raw is None:
+        raise last_exc if last_exc else RuntimeError("LLM API call failed")
     data = json.loads(raw)
     content = data["choices"][0]["message"]["content"]
     return {
