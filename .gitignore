@@ -15,4 +15,7 @@ runs/
 *.pid
 .env
 configs/llm_provider.local.json
+configs/llm_provider.deepseek.json
 docs/next_gpt_paper_handoff_zh.md
+configs/llm_provider.judge_a.json
+configs/llm_provider.judge_b.json
