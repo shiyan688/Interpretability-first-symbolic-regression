@@ -34,15 +34,21 @@ def _collect(results: list[dict[str, Any]], conditions: list[str]) -> dict[str, 
 
 
 def _agg(records: list[dict[str, Any]]) -> dict[str, Any]:
+    def vals_of(key):
+        return [r[key] for r in records if r.get(key) is not None and np.isfinite(r.get(key, np.nan))]
     def mean(key):
-        vals = [r[key] for r in records if r.get(key) is not None and np.isfinite(r.get(key, np.nan))]
-        return float(np.mean(vals)) if vals else None
+        v = vals_of(key)
+        return float(np.mean(v)) if v else None
+    def median(key):
+        v = vals_of(key)
+        return float(np.median(v)) if v else None
     n = len(records)
     aeq = sum(1 for r in records if r.get("algebraic_equivalence"))
     neq = sum(1 for r in records if r.get("numeric_equivalence"))
     return {
         "n": n,
         "test_r2_mean": mean("r2_test"),
+        "test_r2_median": median("r2_test"),
         "expr_sim_mean": mean("expr_sim"),
         "node_count_mean": mean("expanded_node_count"),
         "support_f1_mean": mean("support_f1"),
