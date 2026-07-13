@@ -1,0 +1,22 @@
+{
+  "meta": {
+    "source": "Local faithful reconstruction of the LLM-SRBench LSR-Transform methodology (Shojaee et al., ICML 2025). NOTE: the official llm-srbench HF dataset (239 problems) is GATED and unreachable from this environment; this file reconstructs the LSR-Transform IDEA (rewrite textbook laws into less-common equivalent representations, e.g. solving for a non-standard target variable) so that memorization-resistant reasoning is tested with the SAME API/eval/data protocol. It is NOT the official benchmark and must be labeled as such.",
+    "frozen_on": "2026-07-13",
+    "data_generation": {
+      "n_train": 300, "n_validation": 150, "n_test": 300, "n_exprsim": 300,
+      "target_noise": 0.05, "n_irrelevant": 5, "seed": 20260709
+    }
+  },
+  "formulas": [
+    {"task_id": "T01_ideal_gas_solveV", "name": "理想气体解出V(非常规表示)", "expression": "n * 8.314 * T / P", "variables": [{"name": "n", "low": 0.5, "high": 3.0, "meaning": "moles"}, {"name": "T", "low": 100.0, "high": 400.0, "meaning": "temperature"}, {"name": "P", "low": 0.5, "high": 3.0, "meaning": "pressure"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T02_time_dilation_solvet0", "name": "时间膨胀解出t0", "expression": "t * sqrt(1 - beta**2)", "variables": [{"name": "t", "low": 1.0, "high": 5.0, "meaning": "dilated time"}, {"name": "beta", "low": 0.05, "high": 0.9, "meaning": "v/c"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T03_coulomb_solver", "name": "库仑定律解出r", "expression": "sqrt(q1 * q2 / F)", "variables": [{"name": "q1", "low": 0.5, "high": 3.0, "meaning": "charge 1"}, {"name": "q2", "low": 0.5, "high": 3.0, "meaning": "charge 2"}, {"name": "F", "low": 0.5, "high": 3.0, "meaning": "force"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T04_arrhenius_solveEa", "name": "阿伦尼乌斯解出Ea", "expression": "-8.314 * T * log(k / A)", "variables": [{"name": "k", "low": 0.1, "high": 0.9, "meaning": "rate constant"}, {"name": "A", "low": 1.0, "high": 5.0, "meaning": "pre-exponential"}, {"name": "T", "low": 200.0, "high": 500.0, "meaning": "temperature"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T05_michaelis_solveS", "name": "米氏方程解出S", "expression": "Km * v / (Vmax - v)", "variables": [{"name": "v", "low": 0.2, "high": 2.0, "meaning": "rate"}, {"name": "Vmax", "low": 3.0, "high": 6.0, "meaning": "max rate"}, {"name": "Km", "low": 0.5, "high": 3.0, "meaning": "Michaelis constant"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T06_pendulum_solveL", "name": "单摆解出L", "expression": "9.8 * (T / (2 * pi))**2", "variables": [{"name": "T", "low": 0.5, "high": 3.5, "meaning": "period"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T07_rc_solvet", "name": "RC电路解出t", "expression": "-R * C * log(1 - V / V0)", "variables": [{"name": "V", "low": 0.1, "high": 2.5, "meaning": "voltage"}, {"name": "V0", "low": 3.0, "high": 5.0, "meaning": "source voltage"}, {"name": "R", "low": 0.5, "high": 3.0, "meaning": "resistance"}, {"name": "C", "low": 0.5, "high": 3.0, "meaning": "capacitance"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T08_kepler_solvea", "name": "开普勒解出a(立方根)", "expression": "(Tsq * (M + m) / (4 * pi**2))**(1.0/3.0)", "variables": [{"name": "Tsq", "low": 1.0, "high": 10.0, "meaning": "period squared"}, {"name": "M", "low": 1.0, "high": 5.0, "meaning": "mass M"}, {"name": "m", "low": 0.1, "high": 2.0, "meaning": "mass m"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T09_gravitation_solver", "name": "万有引力解出r", "expression": "sqrt(m1 * m2 / F)", "variables": [{"name": "m1", "low": 0.5, "high": 3.0, "meaning": "mass 1"}, {"name": "m2", "low": 0.5, "high": 3.0, "meaning": "mass 2"}, {"name": "F", "low": 0.5, "high": 3.0, "meaning": "force"}], "regressible": true, "complexity": "transform"},
+    {"task_id": "T10_doppler_solvebeta", "name": "多普勒解出beta", "expression": "1 - f0 / f", "variables": [{"name": "f0", "low": 1.0, "high": 3.0, "meaning": "source frequency"}, {"name": "f", "low": 3.5, "high": 6.0, "meaning": "observed frequency"}], "regressible": true, "complexity": "transform"}
+  ]
+}
