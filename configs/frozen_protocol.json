@@ -1,0 +1,102 @@
+{
+  "protocol_id": "frozen_protocol_v1",
+  "frozen_on": "2026-07-13",
+  "status": "frozen_pending_real_data",
+  "note": "Frozen confirmatory protocol. Fields marked TODO require real catalysis source tables (see configs/dataset_inventory.yaml) before the confirmatory run may start. No field may be changed on the basis of observed confirmatory results.",
+  "code_commit_hash": "cad97e7334d639967ac8e68444676298253fe4f6",
+  "paper_scope_ref": "configs/paper_scope.yaml",
+
+  "data_tasks": {
+    "experiment_1_real": {
+      "n_tasks": 6,
+      "task_ids": "TODO: 6 frozen (source_id,target) pairs from configs/dataset_inventory.yaml main_real_tasks",
+      "status": "pending_real_data"
+    },
+    "experiment_2_known_formula": {
+      "n_tasks": 20,
+      "sampler": "factor_pysr_llm.known_formulas.sample_known_formula_tasks",
+      "sampler_seed": 20260709,
+      "task_ids": [
+        "F_B_13_12", "F_B_15_2p", "F_B_29_5", "F_B_8_14", "F_III_10_19",
+        "F_III_17_37", "F_III_9_52", "F_II_11_27", "F_II_11_28", "F_II_2_42",
+        "F_II_38_3", "F_I_12_11", "F_I_15_3x", "F_I_26_2", "F_I_29_16",
+        "F_I_34_8", "F_I_39_22", "F_I_44_4", "F_I_50_26", "F_I_6_2"
+      ]
+    }
+  },
+
+  "split": {
+    "mode_real": "group (by material/support/batch) preferred, else random",
+    "mode_known": "predefined train/validation/test from data generation",
+    "fractions": [0.6, 0.2, 0.2],
+    "seed": 20260709,
+    "manifest_format": "factor_pysr_llm.splits.SplitManifest (row-ids + sha256)",
+    "split_hashes": "TODO: recorded per task at split generation time"
+  },
+
+  "methods": ["raw_pysr", "external_sr_baseline", "mine_pysr", "if_sr", "if_sr_no_domain"],
+  "ablations": ["mine_pysr (no domain-semantic selection)", "if_sr_no_domain (no approved domain factors)"],
+
+  "sr_hyperparameters": {
+    "engine": "PySR",
+    "binary_operators": ["+", "-", "*", "/"],
+    "unary_operators": ["abs", "inv", "square", "sqrt_abs", "log_abs"],
+    "maxsize": 30,
+    "population_size": 300,
+    "populations": 32,
+    "niterations": 1000000,
+    "timeout_seconds": 86400,
+    "budget_policy": "equal wall-clock / evaluation budget across methods per task"
+  },
+
+  "seeds": [20260709, 20260710, 20260711],
+  "delta": 0.02,
+  "operator_set": ["+", "-", "*", "/", "abs", "inv", "square", "sqrt_abs", "log_abs"],
+
+  "factor_domain_cards": {
+    "schema": "factor_pysr_llm.lineage.FactorCard",
+    "version": "domain_cards_v1",
+    "approval_required": "at least 1 domain reviewer sets approved_for_final_formula",
+    "status": "pending_domain_review"
+  },
+
+  "rubric": {
+    "version": "rubric_v1",
+    "path": "configs/interpretability_rubric.json",
+    "dimensions": ["domain_meaning", "structural_plausibility", "readability_generalizability", "hypothesis_support"],
+    "scale": [1, 5]
+  },
+
+  "llm_judges": {
+    "n_judges": 2,
+    "judge_a": {"model_id": "TODO_model_family_1", "temperature": 0.0, "repeats": 2, "prompt_hash": "recorded_per_run"},
+    "judge_b": {"model_id": "TODO_model_family_2", "temperature": 0.0, "repeats": 2, "prompt_hash": "recorded_per_run"},
+    "order_perturbation": "second run uses a different seed to check position bias",
+    "constraint": "judge models must NOT participate in IF-SR final selection"
+  },
+
+  "expr_sim": {
+    "version": "exprsim_v1",
+    "weights": {
+      "numeric_similarity": 0.50,
+      "variable_set_f1": 0.20,
+      "operator_set_f1": 0.20,
+      "tree_structure_similarity": 0.10
+    },
+    "independent_points": 400,
+    "separate_metrics": ["algebraic_equivalence", "numeric_equivalence", "support_f1"]
+  },
+
+  "failure_exclusion_rules": {
+    "failed_or_timeout_seeds": "recorded in results table, never silently deleted",
+    "hard_violations": "leakage variables, invalid/undefined expressions, definite dimensional add/sub errors",
+    "test_read_policy": "test metrics read exactly once, only after formula lock"
+  },
+
+  "statistics": {
+    "pairing": "by task and seed",
+    "effect_size": true,
+    "confidence_interval": "bootstrap 95%",
+    "human_llm_combination": "never averaged into a single overall score"
+  }
+}
