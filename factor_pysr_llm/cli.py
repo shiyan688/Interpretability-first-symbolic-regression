@@ -225,6 +225,102 @@ def cmd_llm_interpret(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def cmd_export_blind_ratings(args: argparse.Namespace) -> None:
+    from .interpretability_eval import export_blind_ratings
+
+    candidates = json.loads(Path(args.candidates).expanduser().read_text(encoding="utf-8"))
+    if isinstance(candidates, dict):
+        candidates = candidates.get("candidates", candidates.get("items", []))
+    info = export_blind_ratings(
+        candidates,
+        out_manifest=Path(args.out_manifest).expanduser(),
+        out_private_map=Path(args.out_private_map).expanduser(),
+        seed=args.seed,
+    )
+    print(json.dumps(info, indent=2, ensure_ascii=False))
+
+
+def cmd_score_interpretability_prompt(args: argparse.Namespace) -> None:
+    from .interpretability_eval import score_interpretability_prompt
+
+    info = score_interpretability_prompt(
+        manifest_path=Path(args.manifest).expanduser(),
+        rubric_path=Path(args.rubric).expanduser(),
+        out_path=Path(args.output).expanduser(),
+    )
+    print(json.dumps(info, indent=2, ensure_ascii=False))
+
+
+def cmd_run_llm_judge(args: argparse.Namespace) -> None:
+    from .interpretability_eval import build_judge_prompt, load_rubric, run_llm_judge
+    from .model_api import call_openai_compatible
+
+    provider_path = Path(args.provider_config).expanduser()
+
+    def call_fn(prompt: str) -> str:
+        result = call_openai_compatible(provider_path, prompt)
+        return str(result["content"])
+
+    out = run_llm_judge(
+        manifest_path=Path(args.manifest).expanduser(),
+        rubric_path=Path(args.rubric).expanduser(),
+        out_dir=Path(args.out_dir).expanduser(),
+        call_fn=call_fn,
+        model_id=args.model_id,
+        temperature=args.temperature,
+        seed=args.seed,
+        max_retries=args.max_retries,
+        resume=not args.no_resume,
+    )
+    print(json.dumps(out["summary"], indent=2, ensure_ascii=False))
+
+
+def cmd_aggregate_ratings(args: argparse.Namespace) -> None:
+    from .rating_aggregate import aggregate_ratings
+
+    llm_paths = {}
+    for spec in args.llm_results or []:
+        label, _, path = spec.partition("=")
+        if not path:
+            raise SystemExit(f"--llm-results expects label=path, got {spec!r}")
+        llm_paths[label] = Path(path).expanduser()
+    report = aggregate_ratings(
+        human_csv=Path(args.human_csv).expanduser() if args.human_csv else None,
+        llm_result_paths=llm_paths,
+        private_map_path=Path(args.private_map).expanduser() if args.private_map else None,
+        out_path=Path(args.output).expanduser() if args.output else None,
+        seed=args.seed,
+    )
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+
+
+def cmd_expression_similarity(args: argparse.Namespace) -> None:
+    from .expression_similarity import expression_similarity_report
+
+    report = expression_similarity_report(
+        predicted=args.predicted,
+        truth=args.truth,
+        variables=args.variables or None,
+        seed=args.seed,
+        n_points=args.n_points,
+    )
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    if args.output:
+        out = Path(args.output).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def cmd_sample_known_formulas(args: argparse.Namespace) -> None:
+    from .known_formulas import sample_known_formula_tasks
+
+    info = sample_known_formula_tasks(
+        config_path=Path(args.config).expanduser(),
+        output_path=Path(args.output).expanduser() if args.output else None,
+    )
+    print(json.dumps(info, indent=2, ensure_ascii=False))
+
+
 def cmd_generate_split(args: argparse.Namespace) -> None:
     cfg = WorkflowConfig.from_json(args.config)
     fractions = (args.train_fraction, args.validation_fraction, args.test_fraction)
@@ -382,6 +478,53 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--targets", nargs="*")
     m.add_argument("--top-k-per-target", type=int, default=None)
     m.set_defaults(func=cmd_mine_exprs)
+
+    ebr = sub.add_parser("export-blind-ratings", help="Export anonymized blind rating manifest + private map.")
+    ebr.add_argument("--candidates", required=True, help="JSON list of candidates with formula/variables.")
+    ebr.add_argument("--out-manifest", required=True)
+    ebr.add_argument("--out-private-map", required=True)
+    ebr.add_argument("--seed", type=int, default=20260709)
+    ebr.set_defaults(func=cmd_export_blind_ratings)
+
+    sip = sub.add_parser("score-interpretability-prompt", help="Write embedded judge prompts for a rating manifest.")
+    sip.add_argument("--manifest", required=True)
+    sip.add_argument("--rubric", default="configs/interpretability_rubric.json")
+    sip.add_argument("--output", required=True)
+    sip.set_defaults(func=cmd_score_interpretability_prompt)
+
+    rlj = sub.add_parser("run-llm-judge", help="Run an LLM interpretability judge over a rating manifest.")
+    rlj.add_argument("--manifest", required=True)
+    rlj.add_argument("--rubric", default="configs/interpretability_rubric.json")
+    rlj.add_argument("--out-dir", required=True)
+    rlj.add_argument("--provider-config", default="configs/llm_provider.local.json")
+    rlj.add_argument("--model-id", required=True)
+    rlj.add_argument("--temperature", type=float, default=0.0)
+    rlj.add_argument("--seed", type=int, default=20260709)
+    rlj.add_argument("--max-retries", type=int, default=3)
+    rlj.add_argument("--no-resume", action="store_true")
+    rlj.set_defaults(func=cmd_run_llm_judge)
+
+    agg = sub.add_parser("aggregate-ratings", help="Aggregate human and LLM interpretability ratings.")
+    agg.add_argument("--human-csv")
+    agg.add_argument("--llm-results", nargs="*", help="label=path.jsonl entries (e.g. llm_a=judge.jsonl).")
+    agg.add_argument("--private-map")
+    agg.add_argument("--output")
+    agg.add_argument("--seed", type=int, default=20260709)
+    agg.set_defaults(func=cmd_aggregate_ratings)
+
+    es = sub.add_parser("expression-similarity", help="Compute frozen ExprSim between predicted and true formula.")
+    es.add_argument("--predicted", required=True)
+    es.add_argument("--truth", required=True)
+    es.add_argument("--variables", nargs="*", help="Variable names to sample over.")
+    es.add_argument("--n-points", type=int, default=400)
+    es.add_argument("--seed", type=int, default=20260709)
+    es.add_argument("--output")
+    es.set_defaults(func=cmd_expression_similarity)
+
+    skf = sub.add_parser("sample-known-formulas", help="Deterministically sample known-formula tasks (experiment 2).")
+    skf.add_argument("--config", default="configs/known_formula_tasks.yaml")
+    skf.add_argument("--output")
+    skf.set_defaults(func=cmd_sample_known_formulas)
     return p
 
 

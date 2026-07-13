@@ -1,0 +1,74 @@
+{
+  "rubric_id": "rubric_v1",
+  "frozen_on": "2026-07-13",
+  "scale": [1, 5],
+  "instructions": "Rate each formula independently on four dimensions using a 1-5 scale. Use ONLY the variable definitions and task context provided. Do not reward or penalize based on how the formula was produced; method identity, R^2 and any prior explanation are intentionally withheld.",
+  "dimensions": [
+    {
+      "key": "domain_meaning",
+      "title": "Domain meaning of variables and their combination",
+      "anchors": {
+        "1": "Variable combinations are meaningless or physically contradictory; no plausible domain reading.",
+        "2": "A few terms are readable but most combinations lack domain justification.",
+        "3": "About half the structure has a plausible domain reading; the rest is unclear.",
+        "4": "Most variable combinations map to sensible domain quantities with minor gaps.",
+        "5": "Every combination maps cleanly to a recognizable, domain-meaningful quantity."
+      }
+    },
+    {
+      "key": "structural_plausibility",
+      "title": "Structural plausibility against basic scientific common sense",
+      "anchors": {
+        "1": "Structure violates obvious scientific common sense (e.g. adding incompatible quantities everywhere).",
+        "2": "Several structural choices look forced or arbitrary.",
+        "3": "Structure is neither clearly sound nor clearly wrong.",
+        "4": "Structure is mostly consistent with common sense; one or two questionable parts.",
+        "5": "Structure is fully consistent with basic scientific reasoning; no forced relationships."
+      }
+    },
+    {
+      "key": "readability_generalizability",
+      "title": "Readability and ease of generalization",
+      "anchors": {
+        "1": "Unreadable; cannot be summarized or generalized by a human in reasonable time.",
+        "2": "Very hard to read; only isolated parts can be summarized.",
+        "3": "Readable with effort; partial generalization possible.",
+        "4": "Fairly readable and largely generalizable with minor effort.",
+        "5": "Immediately readable and easy to state as a general relationship."
+      }
+    },
+    {
+      "key": "hypothesis_support",
+      "title": "Support for a discussable, testable hypothesis",
+      "anchors": {
+        "1": "Supports no discussable or testable hypothesis.",
+        "2": "Suggests only a vague, hard-to-test idea.",
+        "3": "Supports one weak but discussable hypothesis.",
+        "4": "Supports a clear hypothesis that could be discussed and partially tested.",
+        "5": "Directly suggests a clear, testable hypothesis a domain expert could act on."
+      }
+    }
+  ],
+  "output_schema": {
+    "type": "object",
+    "required": ["item_id", "ratings", "overall_judgment", "confidence"],
+    "properties": {
+      "item_id": {"type": "string"},
+      "ratings": {
+        "type": "object",
+        "required": ["domain_meaning", "structural_plausibility", "readability_generalizability", "hypothesis_support"],
+        "additionalProperties": false,
+        "properties": {
+          "domain_meaning": {"type": "integer", "minimum": 1, "maximum": 5},
+          "structural_plausibility": {"type": "integer", "minimum": 1, "maximum": 5},
+          "readability_generalizability": {"type": "integer", "minimum": 1, "maximum": 5},
+          "hypothesis_support": {"type": "integer", "minimum": 1, "maximum": 5}
+        }
+      },
+      "overall_judgment": {"type": "string"},
+      "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+      "violation_flags": {"type": "array", "items": {"type": "string"}},
+      "rationale": {"type": "string", "maxLength": 600}
+    }
+  }
+}

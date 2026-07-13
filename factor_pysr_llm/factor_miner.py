@@ -433,30 +433,39 @@ def mine_factors(
     }
 
 
-def _read_llm_factor_selection(path: Path) -> set[str]:
+def _read_llm_factor_selection(path: Path) -> tuple[set[str], dict[str, bool]]:
+    """Return (selected identifiers, final_formula_allowed flags by identifier)."""
     if not path.exists():
-        return set()
+        return set(), {}
+    selected: set[str] = set()
+    final_allowed: dict[str, bool] = {}
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             items = data.get("selected_factors", data.get("factors", []))
         else:
             items = data
-        selected: set[str] = set()
         for item in items:
             if isinstance(item, str):
                 selected.add(item)
             elif isinstance(item, dict):
-                for key in ("factor_name", "name", "expression"):
-                    if item.get(key):
-                        selected.add(str(item[key]))
-        return selected
+                keys = [item[k] for k in ("factor_name", "name", "expression") if item.get(k)]
+                for key in keys:
+                    selected.add(str(key))
+                    if "final_formula_allowed" in item:
+                        final_allowed[str(key)] = bool(item["final_formula_allowed"])
+        return selected, final_allowed
     df = safe_read_csv(path)
-    selected = set()
     for col in ("factor_name", "name", "expression"):
         if col in df.columns:
-            selected.update(str(x) for x in df[col].dropna().tolist())
-    return selected
+            for _, row in df.iterrows():
+                val = row.get(col)
+                if pd.isna(val):
+                    continue
+                selected.add(str(val))
+                if "final_formula_allowed" in df.columns and not pd.isna(row.get("final_formula_allowed")):
+                    final_allowed[str(val)] = bool(row.get("final_formula_allowed"))
+    return selected, final_allowed
 
 
 def build_pysr_pool(
@@ -470,17 +479,23 @@ def build_pysr_pool(
     raw_feature_dir = raw_feature_dir or (cfg.output_root / "feature_tables" / target)
     factor_pool_dir = factor_pool_dir or (cfg.output_root / "factor_pools" / target)
     X_raw, y = read_feature_dir(raw_feature_dir)
+    train_mask = _train_mask_from_feature_dir(raw_feature_dir, len(X_raw))
+    score_mask = np.ones(len(y), dtype=bool) if train_mask is None else np.asarray(train_mask, dtype=bool)
     factors = safe_read_csv(factor_pool_dir / "mined_factors.csv")
     factor_values = finite_frame(safe_read_csv(factor_pool_dir / "mined_factor_values.csv"))
     select_cfg = dict(cfg.data.get("factor_selection") or {})
     raw_top_k = select_cfg.get("raw_top_k")
     raw_top_fraction = select_cfg.get("raw_top_fraction")
     factor_top_k = int(select_cfg.get("factor_top_k", 200))
-    llm_keep_extra_top_k = int(select_cfg.get("llm_keep_extra_top_k", factor_top_k))
+    # When True, an LLM selection DRIVES the candidate pool instead of being
+    # unioned into the full corr top-k (which would make selection a no-op).
+    llm_authoritative = bool(select_cfg.get("llm_authoritative", True))
+    # Small corr fallback kept alongside the LLM picks (search aids).
+    llm_fallback_top_k = int(select_cfg.get("llm_fallback_top_k", 0))
 
     raw_scores = []
     for col in X_raw.columns:
-        score, _ = _corr_score(X_raw[col].to_numpy(dtype=float), y)
+        score, _ = _corr_score(X_raw[col].to_numpy(dtype=float)[score_mask], y[score_mask])
         raw_scores.append((score, col))
     raw_scores.sort(reverse=True)
     if raw_top_k is None and raw_top_fraction is not None:
@@ -491,17 +506,50 @@ def build_pysr_pool(
         raw_keep = [col for _, col in raw_scores[: int(raw_top_k)]]
 
     factor_ranked = factors.sort_values("score_abs_corr", ascending=False)
-    selected_names = set(factor_ranked.head(factor_top_k)["factor_name"].astype(str))
-    selected_source = {name: "factor_ranked_corr" for name in selected_names}
+    final_formula_allowed: dict[str, bool] = {}
+    llm_selected: set[str] = set()
+    llm_final_flags: dict[str, bool] = {}
     if llm_selection_path:
-        llm_selected = _read_llm_factor_selection(llm_selection_path)
-        if llm_selected:
+        llm_selected, llm_final_flags = _read_llm_factor_selection(llm_selection_path)
+
+    if llm_selection_path and llm_selected and llm_authoritative:
+        # Candidate pool is driven by the LLM selection. Map ids/expressions to
+        # factor_name and honor final_formula_allowed.
+        matched_names: list[str] = []
+        for _, row in factors.iterrows():
+            fname = str(row["factor_name"])
+            fexpr = str(row["expression"])
+            hit_key = None
+            if fname in llm_selected:
+                hit_key = fname
+            elif fexpr in llm_selected:
+                hit_key = fexpr
+            if hit_key is not None:
+                matched_names.append(fname)
+                final_formula_allowed[fname] = bool(llm_final_flags.get(hit_key, False))
+        selected_names = set(matched_names)
+        selected_source = {name: "llm_selected" for name in selected_names}
+        # optional small corr fallback to aid PySR search
+        for name in factor_ranked.head(llm_fallback_top_k)["factor_name"].astype(str):
+            if name not in selected_names:
+                selected_names.add(name)
+                selected_source[name] = "corr_fallback"
+                final_formula_allowed.setdefault(name, False)
+    else:
+        # Legacy / no-LLM path: corr top-k pool.
+        selected_names = set(factor_ranked.head(factor_top_k)["factor_name"].astype(str))
+        selected_source = {name: "factor_ranked_corr" for name in selected_names}
+        for name in selected_names:
+            final_formula_allowed.setdefault(name, False)
+        if llm_selection_path and llm_selected and not llm_authoritative:
+            llm_keep_extra_top_k = int(select_cfg.get("llm_keep_extra_top_k", factor_top_k))
             by_name = factors[factors["factor_name"].astype(str).isin(llm_selected)]["factor_name"].astype(str)
             by_expr = factors[factors["expression"].astype(str).isin(llm_selected)]["factor_name"].astype(str)
             matched = list(dict.fromkeys([*by_name.tolist(), *by_expr.tolist()]))
             for name in matched[:llm_keep_extra_top_k]:
                 selected_names.add(name)
                 selected_source[name] = "llm_selected"
+                final_formula_allowed[name] = bool(llm_final_flags.get(name, False))
 
     factor_keep = [name for name in factor_ranked["factor_name"].astype(str).tolist() if name in selected_names]
     X_factor = factor_values[factor_keep].copy() if factor_keep else pd.DataFrame(index=X_raw.index)
@@ -509,20 +557,32 @@ def build_pysr_pool(
     X = pd.concat([X_raw[raw_keep].reset_index(drop=True), X_factor.reset_index(drop=True)], axis=1)
     X = finite_frame(X)
 
-    lin = LinearRegression().fit(X.to_numpy(dtype=float), y)
-    pred = lin.predict(X.to_numpy(dtype=float))
-    linear_r2 = float(r2_score(y, pred))
-    linear_rmse = float(math.sqrt(mean_squared_error(y, pred)))
+    Xtr = X.to_numpy(dtype=float)[score_mask]
+    ytr = y[score_mask]
+    lin = LinearRegression().fit(Xtr, ytr)
+    pred = lin.predict(Xtr)
+    linear_r2 = float(r2_score(ytr, pred))
+    linear_rmse = float(math.sqrt(mean_squared_error(ytr, pred)))
 
     out_dir = cfg.output_root / "feature_tables" / f"{target}__{output_tag}"
     out_dir.mkdir(parents=True, exist_ok=True)
     X.to_csv(out_dir / "features.csv", index=False)
     X.to_csv(out_dir / "hybrid_features.csv", index=False)
     pd.DataFrame({"target": y}).to_csv(out_dir / "y.csv", index=False)
+    if train_mask is not None:
+        roles = np.array(["unassigned"] * len(X), dtype=object)
+        roles[score_mask] = "train"
+        # copy full role vector from raw feature dir if present
+        raw_roles_path = raw_feature_dir / "row_roles.csv"
+        if raw_roles_path.exists():
+            (out_dir / "row_roles.csv").write_text(raw_roles_path.read_text(encoding="utf-8"), encoding="utf-8")
 
     selected_factor_rows = factors[factors["factor_name"].astype(str).isin(factor_keep)].copy()
     selected_factor_rows["pysr_column"] = selected_factor_rows["factor_name"].map(lambda x: f"mine_{x}")
     selected_factor_rows["selection_source"] = selected_factor_rows["factor_name"].astype(str).map(selected_source).fillna("")
+    selected_factor_rows["final_formula_allowed"] = selected_factor_rows["factor_name"].astype(str).map(
+        lambda x: bool(final_formula_allowed.get(x, False))
+    )
     selected_factor_rows.to_csv(out_dir / "selected_mined_factors.csv", index=False)
     manifest = {
         "target": target,
@@ -530,11 +590,14 @@ def build_pysr_pool(
         "raw_feature_dir": str(raw_feature_dir),
         "factor_pool_dir": str(factor_pool_dir),
         "llm_selection_path": str(llm_selection_path) if llm_selection_path else None,
+        "llm_authoritative": llm_authoritative,
+        "n_llm_selected": int(len(llm_selected)),
         "n_rows": int(len(X)),
         "n_features": int(X.shape[1]),
         "n_raw_features": int(len(raw_keep)),
         "n_mined_factors": int(len(factor_keep)),
-        "linear_r2": linear_r2,
+        "n_final_formula_allowed": int(sum(1 for v in final_formula_allowed.values() if v)),
+        "train_linear_r2" if train_mask is not None else "linear_r2": linear_r2,
         "linear_rmse": linear_rmse,
         "feature_source": {col: ("raw_dataset" if col in raw_keep else "mined_factor") for col in X.columns},
         "selection_config": select_cfg,

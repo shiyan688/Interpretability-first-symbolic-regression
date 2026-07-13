@@ -100,18 +100,44 @@ def write_factor_proposal_prompt(
     return out_path
 
 
+def _factor_variable_map(expression: str) -> str:
+    from .expr import identifier_names
+
+    return ", ".join(sorted(identifier_names(str(expression)))) or "(none)"
+
+
 def write_factor_selection_prompt(
     cfg: WorkflowConfig,
     target: str,
     factor_pool_dir: Path | None = None,
     top_k: int = 200,
+    batch_size: int | None = None,
 ) -> Path:
     factor_pool_dir = factor_pool_dir or (cfg.output_root / "factor_pools" / target)
     factors = safe_read_csv(factor_pool_dir / "mined_factors.csv")
-    top = factors.sort_values("score_abs_corr", ascending=False).head(top_k)
+    ranked = factors.sort_values("score_abs_corr", ascending=False).reset_index(drop=True)
+    top = ranked.head(top_k).copy()
     out_dir = cfg.output_root / "llm_prompts" / target
     out_dir.mkdir(parents=True, exist_ok=True)
     top.to_csv(out_dir / "top_mined_factors_for_llm.csv", index=False)
+
+    # Build the candidate table that is actually EMBEDDED in the prompt so a
+    # remote LLM (which cannot read local files) sees the real content.
+    display = top.copy()
+    display["variables"] = display["expression"].map(_factor_variable_map)
+    table_cols = [c for c in ("factor_name", "expression", "variables", "score_abs_corr", "order", "source") if c in display.columns]
+    embedded_table = _markdown_table(display[table_cols])
+
+    # Explicit batching rule when the pool is large.
+    n = len(top)
+    batch_note = ""
+    if batch_size and n > batch_size:
+        n_batches = (n + batch_size - 1) // batch_size
+        batch_note = (
+            f"\n> 因子较多（{n} 个）。请按每批 {batch_size} 个分 {n_batches} 批评估，"
+            f"最终合并 selected_factors；不要因为超长而丢弃后面批次。\n"
+        )
+
     template = {
         "target": target,
         "selected_factors": [
@@ -130,21 +156,33 @@ def write_factor_selection_prompt(
 
 目标：`{target}`
 
-下面是 Python SISSO-like 枚举后按 `abs(corr(factor, y))` 排序的因子池。
-请从中选择有意义的因子进入 PySR，兼顾 R2 潜力和解释性。
+下面是 Python SISSO-like 枚举后按 `abs(corr(factor, y))`（仅 train 行计算）排序的
+因子池 top-{n}。请从中选择进入 PySR 的因子，兼顾 R2 潜力和解释性。
+{batch_note}
+## 候选因子（已内嵌，请只从下表中选择 factor_name）
 
-## 因子池文件
-
-- factor_pool_dir: `{factor_pool_dir}`
-- top factors csv: `{out_dir / "top_mined_factors_for_llm.csv"}`
-- selection template: `{out_dir / "factor_selection_template.json"}`
+{embedded_table}
 
 ## 选择规则
 
 1. 优先选择表达式短、变量含义明确、量纲关系可解释的因子。
 2. 保留少量相关性很高但解释性一般的因子，作为 PySR 搜索辅助。
-3. 明确标记哪些因子允许进入最终解释公式。
-4. 返回 JSON，字段使用 `factor_selection_template.json`。
+3. 用 `final_formula_allowed` 明确标记哪些因子允许进入最终解释公式；
+   只有 `final_formula_allowed: true` 的因子才会被视为可进入最终公式的领域因子。
+4. `factor_name` 必须精确匹配上表中的值；未知名称会被判为匹配失败。
+
+## 输出 schema（严格 JSON）
+
+```json
+{{
+  "target": "{target}",
+  "selected_factors": [
+    {{"factor_name": "<上表中的 factor_name>", "reason": "<简短理由>", "final_formula_allowed": true}}
+  ]
+}}
+```
+
+只返回 JSON，不要额外文字。
 """
     out_path = out_dir / "factor_selection_prompt.md"
     out_path.write_text(prompt, encoding="utf-8")
