@@ -72,33 +72,62 @@ def call_openai_compatible(
         },
         method="POST",
     )
-    # Retry with exponential backoff on transient network / rate-limit errors
-    # (e.g. ConnectionRefusedError 111 when the provider throttles bursts, or
-    # HTTP 429/5xx). Deterministic failures (4xx other than 429) are not retried.
+    # Retry with exponential backoff on transient network / rate-limit errors.
+    # NOTE: urllib's `timeout` is per-socket-operation; some providers accept the
+    # TCP connection then stall before sending any byte, so urlopen can hang far
+    # longer than `timeout`. We therefore run each request in a worker thread and
+    # enforce a HARD wall-clock deadline via Thread.join(deadline); a stalled call
+    # is abandoned and retried.
+    import threading
     import time as _time
 
     max_retries = int(cfg.get("max_retries", 5))
     backoff = float(cfg.get("retry_backoff_seconds", 3.0))
+    sock_timeout = float(cfg.get("timeout_seconds", 120))
+    hard_deadline = float(cfg.get("hard_deadline_seconds", sock_timeout + 30.0))
+
+    def _do_request() -> tuple[str | None, Exception | None]:
+        try:
+            with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
+                return resp.read().decode("utf-8"), None
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            return None, RuntimeError(f"LLM API HTTP {exc.code}: {detail}::code={exc.code}")
+        except Exception as exc:  # URLError, timeout, connection errors
+            return None, exc
+
     raw = None
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_seconds", 120))) as resp:
-                raw = resp.read().decode("utf-8")
-            break
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            if exc.code in (429, 500, 502, 503, 504) and attempt < max_retries:
-                last_exc = RuntimeError(f"LLM API HTTP {exc.code}: {detail}")
-                _time.sleep(backoff * attempt)
-                continue
-            raise RuntimeError(f"LLM API HTTP {exc.code}: {detail}") from exc
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-            last_exc = exc
+        result: dict[str, Any] = {}
+
+        def _worker():
+            result["out"] = _do_request()
+
+        th = threading.Thread(target=_worker, daemon=True)
+        th.start()
+        th.join(hard_deadline)
+        if th.is_alive():
+            # stalled connection: abandon this attempt (thread is daemon, will die)
+            last_exc = TimeoutError(f"hard deadline {hard_deadline}s exceeded")
             if attempt < max_retries:
                 _time.sleep(backoff * attempt)
                 continue
-            raise
+            raise last_exc
+        raw, err = result.get("out", (None, RuntimeError("no result")))
+        if raw is not None:
+            break
+        # classify error for retry
+        msg = str(err)
+        retryable_http = any(f"::code={c}" in msg for c in (429, 500, 502, 503, 504))
+        is_http = "::code=" in msg
+        if is_http and not retryable_http:
+            raise RuntimeError(msg.split("::code=")[0])
+        last_exc = err
+        if attempt < max_retries:
+            _time.sleep(backoff * attempt)
+            continue
+        raise err if err else RuntimeError("LLM API call failed")
     if raw is None:
         raise last_exc if last_exc else RuntimeError("LLM API call failed")
     data = json.loads(raw)
