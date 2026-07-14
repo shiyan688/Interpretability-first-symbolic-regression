@@ -46,9 +46,12 @@
 - 本报告用 `configs/lsr_transform_formulas.json` **忠实复现 LSR-Transform 的方法学思想**（把常见定律改写为不常见等价表示以抗记忆），并用相同 API/评测/协议运行，可作为方法学层面的对照。
 - LLM-SRBench 论文公开参考数：目前最强系统 symbolic accuracy 仅 **31.5%**，佐证"精确恢复很难、记忆会虚高指标"这一结论，与本文观测一致（外部引用，非本环境复现）。
 
-## 五、待补（运行中/排队）
+## 五、已完成（本节原为"待补"，现全部跑完）
 
-- IF-SR/PySR 三条件在**标准 29 任务**上的确认性结果（tmux `exp2_full`，进行中）。
-- IF-SR/PySR 三条件在 **LSR-Transform 10 任务**上的结果（tmux 已排队，等主运行结束自动启动，避免 CPU 争用）。
-- 五方法**统一盲评**（同一批 DeepSeek judge），输出 by-method 可解释性均分。
-- 合并到最终对比表：test R²、ExprSim、复杂度、等价率、可解释性五指标 × 五方法 × 两数据集。
+全部 402 次运行成功、0 失败。完整的五方法 × 三数据集对比表、统一盲评与结论见
+**`docs/final_comparison_report.md`（完整实验报告）**。要点：
+
+- 标准 29 公式、LSR-Transform 10 任务、真实 LLM-SRBench 28 任务的 IF-SR/PySR 三条件均已完成。
+- 双 DeepSeek 判官盲评：IF-SR 可解释性排第一（2.76 / 2.79）。
+- IF-SR 在三数据集上"R² 基本不降、公式最短"；Direct-LLM 靠记忆（抗记忆任务崩溃）；
+  LLM-SR 拟合强但冗长。

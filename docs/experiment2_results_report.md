@@ -4,9 +4,12 @@
 数据来源：`examples/实验2_科学公式数据集清单.md`（30 条科学公式）
 运行产物：`outputs/experiment2_run/`（gitignore，不入库）
 
-> 状态：**初步真实运行**。SR 引擎为真实 PySR，LLM judge 为真实 DeepSeek
-> （deepseek-chat + deepseek-reasoner）。本轮跑通 10 个代表任务 × 3 条件 × 1 seed，
-> 用于验证方法与全链路。确认性主表需扩到全部可回归任务 × 3 seeds（见"下一步"）。
+> 状态：**初步真实运行（10 任务 × 1 seed）**。SR 引擎为真实 PySR，LLM judge 为真实 DeepSeek。
+> 本轮用于验证方法与全链路。
+>
+> **⚠️ 已被确认性结果取代**：全部 29 可回归公式 × 3 seeds 的确认性结果、以及与
+> Direct-LLM / LLM-SR 的对比和真实 LLM-SRBench 评测，见
+> **`docs/final_comparison_report.md`（完整实验报告）**。本文件保留作为早期记录。
 
 ## 一、实验设置
 
