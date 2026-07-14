@@ -43,6 +43,14 @@ def safe_sqrt(x: Any) -> Any:
     return np.sqrt(np.abs(x))
 
 
+def sqrt_abs(x: Any) -> Any:
+    return np.sqrt(np.abs(x))
+
+
+def log_abs(x: Any) -> Any:
+    return np.log(np.abs(x) + EPS)
+
+
 def namespace_from_frame(frame: pd.DataFrame) -> dict[str, Any]:
     ns: dict[str, Any] = {
         "abs": np.abs,
@@ -58,6 +66,10 @@ def namespace_from_frame(frame: pd.DataFrame) -> dict[str, Any]:
         "cbrt": np.cbrt,
         "pow": np.power,
         "pi": math.pi,
+        # Mining-layer operators so mined factor expressions round-trip through
+        # eval_expr (see factor_miner._unary_ops). Semantics must match exactly.
+        "sqrt_abs": sqrt_abs,
+        "log_abs": log_abs,
     }
     for col in frame.columns:
         ns[str(col)] = pd.to_numeric(frame[col], errors="coerce").to_numpy(dtype=float)
@@ -118,6 +130,8 @@ def identifier_names(expr: str) -> set[str]:
         "cbrt",
         "pow",
         "pi",
+        "sqrt_abs",
+        "log_abs",
     }
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     return {x for x in names if x not in funcs}
