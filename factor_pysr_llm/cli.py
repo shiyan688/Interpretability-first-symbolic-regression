@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import WorkflowConfig
+from .cv import evaluate_cv
 from .dataset import build_raw_feature_table, inspect_dataset
 from .factor_miner import build_pysr_pool, mine_factors
 from .features import build_union
@@ -357,6 +358,56 @@ def cmd_llm_call(args: argparse.Namespace) -> None:
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
+def cmd_cv_evaluate(args: argparse.Namespace) -> None:
+    from .reports import read_feature_dir
+
+    cfg = WorkflowConfig.from_json(args.config)
+    mining_opts = dict(cfg.data.get("factor_mining") or {})
+    selection_opts = dict(cfg.data.get("factor_selection") or {})
+    rows = []
+    for target in _targets_from_args(cfg, args):
+        feature_dir = (
+            Path(args.feature_dir).expanduser()
+            if args.feature_dir
+            else cfg.output_root / "feature_tables" / target
+        )
+        X, y = read_feature_dir(feature_dir)
+        report = evaluate_cv(
+            X,
+            y,
+            mining_opts=mining_opts,
+            selection_opts=selection_opts,
+            k=args.k,
+            mode=args.mode,
+            model=args.model,
+            seed=args.seed,
+        )
+        report["target"] = target
+        report["feature_dir"] = str(feature_dir)
+        out_dir = cfg.output_root / "cv" / target
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "cv_report.json").write_text(
+            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        rows.append(report)
+        honest = report.get("honest", {})
+        leaky = report.get("leaky", {})
+        gap = report.get("leakage_gap_r2")
+        parts = [f"{target}: k={report['k']}"]
+        if honest:
+            parts.append(f"honest_r2={honest.get('mean_r2'):.4f}+/-{honest.get('std_r2'):.4f}")
+        if leaky:
+            parts.append(f"leaky_r2={leaky.get('mean_r2'):.4f}+/-{leaky.get('std_r2'):.4f}")
+        if gap is not None:
+            parts.append(f"leakage_gap={gap:.4f}")
+        print(" ".join(parts))
+    if args.output:
+        out = Path(args.output).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"wrote {out}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="factor-pysr-llm")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -525,6 +576,21 @@ def build_parser() -> argparse.ArgumentParser:
     skf.add_argument("--config", default="configs/known_formula_tasks.yaml")
     skf.add_argument("--output")
     skf.set_defaults(func=cmd_sample_known_formulas)
+
+    cv = sub.add_parser(
+        "cv-evaluate",
+        help="Leakage-aware K-fold CV: mine+select inside each fold (honest) vs on full data (leaky).",
+    )
+    _add_common_config(cv)
+    cv.add_argument("--target")
+    cv.add_argument("--targets", nargs="*")
+    cv.add_argument("--feature-dir")
+    cv.add_argument("--k", type=int, default=5)
+    cv.add_argument("--mode", choices=["honest", "leaky", "both"], default="both")
+    cv.add_argument("--model", choices=["linear", "pysr"], default="linear")
+    cv.add_argument("--seed", type=int, default=20260714)
+    cv.add_argument("--output")
+    cv.set_defaults(func=cmd_cv_evaluate)
     return p
 
 

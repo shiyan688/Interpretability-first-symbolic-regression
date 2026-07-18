@@ -288,6 +288,106 @@ def mine_factors_from_frame(
     return rows, values, manifest
 
 
+@dataclass
+class FeatureSpec:
+    """A selected model input, expressed so it can be re-evaluated on any
+    raw feature frame via expr.eval_expr.
+
+    - ``source == "raw"``: ``expression`` is a bare raw column name.
+    - ``source == "mined"``: ``expression`` is a mined factor expression over
+      raw columns (uses only operators available in expr.namespace_from_frame).
+    """
+
+    name: str
+    expression: str
+    source: str
+    abs_corr: float
+
+
+def select_factor_expressions(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    mining_opts: dict[str, Any] | None = None,
+    selection_opts: dict[str, Any] | None = None,
+) -> list[FeatureSpec]:
+    """Run mine + correlation-based selection purely in memory and return the
+    chosen feature set as re-evaluable expressions.
+
+    This is the leakage-safe core of the pipeline: every decision here uses only
+    the (X, y) passed in, so callers can invoke it on a single CV training fold
+    without touching held-out labels. It intentionally does NOT read/write files
+    and does NOT apply LLM-in-the-loop selection (an LLM selection file is a
+    full-data artifact and would reintroduce leakage inside a fold).
+    """
+
+    X = finite_frame(X)
+    yy = np.asarray(y, dtype=float)
+    sel = dict(selection_opts or {})
+
+    # 1) mine factors on this (X, y) only.
+    rows, _, _ = mine_factors_from_frame(X, yy, mining_opts)
+
+    # 2) raw feature keep-set, mirroring build_pysr_pool raw_top_k / raw_top_fraction.
+    raw_scores: list[tuple[float, str]] = []
+    for col in X.columns:
+        score, _ = _corr_score(X[col].to_numpy(dtype=float), yy)
+        raw_scores.append((score, str(col)))
+    raw_scores.sort(reverse=True, key=lambda item: item[0])
+    raw_top_k = sel.get("raw_top_k")
+    raw_top_fraction = sel.get("raw_top_fraction")
+    if raw_top_k is None and raw_top_fraction is not None:
+        raw_top_k = max(1, int(math.ceil(float(raw_top_fraction) * X.shape[1])))
+    if raw_top_k is None:
+        raw_keep = [(score, col) for score, col in raw_scores]
+    else:
+        raw_keep = raw_scores[: int(raw_top_k)]
+
+    specs: list[FeatureSpec] = [
+        FeatureSpec(name=col, expression=col, source="raw", abs_corr=float(score))
+        for score, col in raw_keep
+    ]
+
+    # 3) mined factor keep-set, mirroring build_pysr_pool factor_top_k.
+    factor_top_k = int(sel.get("factor_top_k", 200))
+    if not rows.empty:
+        ranked = rows.sort_values("score_abs_corr", ascending=False).head(factor_top_k)
+        for _, row in ranked.iterrows():
+            expr = str(row.get("expression", "")).strip()
+            if not expr:
+                continue
+            specs.append(
+                FeatureSpec(
+                    name=f"mine_{row.get('factor_name', expr)}",
+                    expression=expr,
+                    source="mined",
+                    abs_corr=float(row.get("score_abs_corr", 0.0)),
+                )
+            )
+    return specs
+
+
+def build_design_matrix(X_raw: pd.DataFrame, specs: list[FeatureSpec]) -> pd.DataFrame:
+    """Evaluate each FeatureSpec expression on a raw feature frame.
+
+    Used to materialise the same selected feature set on a held-out fold. Columns
+    that fail to evaluate or are non-finite are filled with zeros (finite_frame),
+    matching the rest of the pipeline's numeric hygiene.
+    """
+
+    cols: dict[str, np.ndarray] = {}
+    n = len(X_raw)
+    for i, spec in enumerate(specs):
+        try:
+            values = eval_expr(spec.expression, X_raw)
+        except Exception:
+            values = np.zeros(n, dtype=float)
+        if np.asarray(values).shape != (n,):
+            values = np.full(n, float(np.asarray(values).ravel()[0]) if np.asarray(values).size else 0.0)
+        name = spec.name if spec.name not in cols else f"{spec.name}__{i}"
+        cols[name] = np.asarray(values, dtype=float)
+    return finite_frame(pd.DataFrame(cols, index=X_raw.index))
+
+
 def _safe_proposed_name(name: str, index: int) -> str:
     text = "".join(ch if ch.isalnum() else "_" for ch in str(name)).strip("_")
     if not text:
