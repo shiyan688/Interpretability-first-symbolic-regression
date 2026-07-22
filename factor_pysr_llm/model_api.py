@@ -69,6 +69,10 @@ def call_openai_compatible(
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            # Force a fresh connection per request. In long-lived batch processes
+            # a reused keep-alive socket can wedge (server stalls mid-stream),
+            # blocking far past the per-op timeout; close avoids stale reuse.
+            "Connection": "close",
         },
         method="POST",
     )

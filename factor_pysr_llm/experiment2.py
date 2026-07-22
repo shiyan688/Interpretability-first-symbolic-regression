@@ -167,9 +167,17 @@ def _archive_from_equations(
     X: pd.DataFrame,
     y: np.ndarray,
     masks: dict[str, np.ndarray],
+    card_index: dict[str, "FactorCard"] | None = None,
 ) -> list[dict[str, Any]]:
-    """Score every Pareto equation on validation and test (test kept but not
-    used for selection)."""
+    """Score every Pareto equation on VALIDATION only (P0-7: test is NOT read
+    here; it is evaluated once after the formula is locked, see lock_test_metric).
+
+    ``expanded_node_count`` is measured on the FULLY EXPANDED expression (P0-1):
+    mined-factor column names (e.g. ``sq_t``, ``div_q1_r``) are expanded back to
+    raw variables via ``card_index`` before counting, so aliases cannot hide
+    complexity.
+    """
+    card_index = card_index or {}
     archive = []
     for i, row in eqs.iterrows():
         expr = str(row["equation"])
@@ -183,17 +191,22 @@ def _archive_from_equations(
                 return float("nan")
             return float(r2_score(y[m], pred[m]))
         try:
-            cx = complexity_stats(expr, {})["expanded_node_count"]
+            stats = complexity_stats(expr, card_index)
+            cx = stats["expanded_node_count"]
+            expanded = stats["expanded_expression"]
         except Exception:
             cx = int(row.get("complexity", 999))
+            expanded = expr
         archive.append({
             "candidate_id": f"eq_{i}",
             "expression": expr,
+            "expanded_expression": expanded,
             "pysr_complexity": int(row.get("complexity", -1)),
             "expanded_node_count": int(cx),
             "loss": float(row.get("loss", float("nan"))),
             "r2_val": r2_on(masks["validation"]),
-            "r2_test": r2_on(masks["test"]),
+            # test intentionally NOT computed here (locked-once policy)
+            "eq_index": int(i),
         })
     return archive
 
@@ -216,10 +229,21 @@ def run_task(
     y = td.frame["y"].to_numpy(dtype=float)
     masks = {r: (td.roles == r) for r in ("train", "validation", "test")}
 
-    # ---- raw condition ----
+    def lock_test_metric(model, X, eq_index):
+        """P0-7: compute test R^2 ONCE, only after the formula is locked."""
+        try:
+            pred = np.asarray(model.predict(X.to_numpy(dtype=float), int(eq_index)), dtype=float)
+        except Exception:
+            return float("nan")
+        m = masks["test"] & np.isfinite(pred) & np.isfinite(y)
+        if int(m.sum()) < 3:
+            return float("nan")
+        return float(r2_score(y[m], pred[m]))
+
+    # ---- raw condition (no mined cards) ----
     X_raw = td.frame[td.variables + td.irrelevant].copy()
     raw_eqs, raw_model = _run_pysr(X_raw, y, masks["train"], seed, budget)
-    raw_archive = _archive_from_equations(raw_eqs, raw_model, X_raw, y, masks)
+    raw_archive = _archive_from_equations(raw_eqs, raw_model, X_raw, y, masks, card_index={})
 
     # ---- mined condition (raw + generic factor columns) ----
     factors = _mined_factor_columns(td.frame, td.variables)
@@ -235,32 +259,33 @@ def run_task(
     mine_cards = [FactorCard(n, n, e, source="mined", unit_status="screening_only") for n, e in kept_factors.items()]
     mine_card_index = build_card_index(mine_cards)
     mine_eqs, mine_model = _run_pysr(X_mine, y, masks["train"], seed, budget)
-    mine_archive = _archive_from_equations(mine_eqs, mine_model, X_mine, y, masks)
+    # P0-1: pass the card index so expanded_node_count counts EXPANDED nodes
+    mine_archive = _archive_from_equations(mine_eqs, mine_model, X_mine, y, masks, card_index=mine_card_index)
 
-    # ---- selections ----
+    # ---- selections (validation-only) ----
     raw_sel = standard_select(raw_archive)
     mine_sel = standard_select(mine_archive)
 
-    # IF-SR: interpretability-first over the mined archive (validation-only)
+    # IF-SR: interpretability-first over the mined archive.
+    # P0-1: pass cards=mine_cards so the selector minimizes EXPANDED complexity.
     ifsr_cands = [
         Candidate(candidate_id=c["candidate_id"], expression=c["expression"], r2_val=c["r2_val"],
-                  r2_test=c["r2_test"], stability=0.0)
+                  stability=0.0)
         for c in mine_archive if np.isfinite(c["r2_val"])
     ]
-    ifsr_decision = select_if_sr(ifsr_cands, delta=float(budget.get("delta", 0.02))) if ifsr_cands else {"selected": None}
+    ifsr_decision = select_if_sr(ifsr_cands, delta=float(budget.get("delta", 0.02)),
+                                 cards=mine_cards) if ifsr_cands else {"selected": None}
     ifsr_sel = None
     if ifsr_decision.get("selected"):
         sid = ifsr_decision["selected"]["candidate_id"]
         ifsr_sel = next((c for c in mine_archive if c["candidate_id"] == sid), None)
 
-    # ---- ExprSim vs ground truth on independent points ----
-    def pack(name, sel, card_index):
+    # ---- pack: test locked once here; ExprSim on independent points ----
+    def pack(name, sel, model, X):
         if not sel:
             return {"condition": name, "selected": None}
-        try:
-            expanded = expand_expression(sel["expression"], card_index) if card_index else sel["expression"]
-        except Exception:
-            expanded = sel["expression"]
+        expanded = sel.get("expanded_expression") or sel["expression"]
+        r2_test = lock_test_metric(model, X, sel["eq_index"])  # locked-once test read
         es = expression_similarity_report(
             expanded, td.expression, variables=td.variables + td.irrelevant,
             seed=seed + 7, n_points=int(gen.get("n_exprsim", 300)),
@@ -270,7 +295,7 @@ def run_task(
             "expression": sel["expression"],
             "expanded_expression": expanded,
             "r2_val": sel["r2_val"],
-            "r2_test": sel["r2_test"],
+            "r2_test": r2_test,
             "expanded_node_count": sel["expanded_node_count"],
             "expr_sim": es["expr_sim"],
             "algebraic_equivalence": es["separate_metrics"]["algebraic_equivalence"],
@@ -286,9 +311,9 @@ def run_task(
         "n_raw_candidates": len(raw_archive),
         "n_mine_candidates": len(mine_archive),
         "conditions": {
-            "raw_pysr": pack("raw_pysr", raw_sel, {}),
-            "mine_pysr": pack("mine_pysr", mine_sel, mine_card_index),
-            "if_sr": pack("if_sr", ifsr_sel, mine_card_index),
+            "raw_pysr": pack("raw_pysr", raw_sel, raw_model, X_raw),
+            "mine_pysr": pack("mine_pysr", mine_sel, mine_model, X_mine),
+            "if_sr": pack("if_sr", ifsr_sel, mine_model, X_mine),
         },
         "ifsr_threshold": ifsr_decision.get("threshold"),
     }

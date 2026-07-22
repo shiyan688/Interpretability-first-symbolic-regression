@@ -20,3 +20,18 @@ docs/next_gpt_paper_handoff_zh.md
 configs/llm_provider.judge_a.json
 configs/llm_provider.judge_b.json
 configs/llm_provider.judge_b_chat.json
+
+# LLM-SRBench dataset, acquisition/runner scripts and derived artifacts are NOT
+# redistributed (upstream dataset license). Kept local only.
+factor_pysr_llm/llmsrbench_loader.py
+factor_pysr_llm/llmsrbench_runner.py
+scripts/run_llmsrbench_llm.py
+scripts/run_llmsrbench_pysr.py
+scripts/run_llmsrbench_llm_full.py
+scripts/download_llmsrbench_full.py
+paper/tables/table_llmsrbench.*
+outputs/llmsrbench_data/
+outputs/llmsrbench_data_full/
+outputs/llmsrbench_llm/
+outputs/llmsrbench_llm_full/
+outputs/llmsrbench_pysr/
